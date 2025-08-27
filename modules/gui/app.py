@@ -657,9 +657,11 @@ class TextToSpeechApp(ctk.CTk):
                         )
                     )
                     
-                    # Create output filename for chapter
+                    # Create output filename for chapter using the original chapter number
                     base, ext = os.path.splitext(output_file)
-                    chapter_output = f"{base}_capitulo{self.current_chapter}{ext}"
+                    # Get the original chapter number from selected_chapters if available
+                    chapter_num = self.selected_chapters[i] + 1 if hasattr(self, 'selected_chapters') and self.selected_chapters else (i + 1)
+                    chapter_output = f"{base}_capitulo{chapter_num:02d}{ext}"
                     
                     # Convert this chapter
                     processed_before = sum(

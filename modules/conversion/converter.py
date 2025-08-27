@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from typing import Optional, Callable, List, Dict, Any
 import edge_tts
 
@@ -136,17 +137,27 @@ class AudioConverter:
                 
                 # Filter chapters if specified
                 if selected_chapters is not None:
-                    result = [result[i] for i in selected_chapters if i < len(result)]
+                    # Create a new list with only the selected chapters, but keep their original indices
+                    filtered_result = [(i, result[i]) for i in range(len(result)) if i in selected_chapters]
+                    result = filtered_result
+                else:
+                    # If no chapters are selected, include all with their original indices
+                    result = list(enumerate(result))
                 
                 # Convert each chapter
                 total_chapters = len(result)
-                for i, chapter in enumerate(result):
+                for i, (original_idx, chapter) in enumerate(result):
                     if progress_callback:
-                        progress_callback(i, total_chapters)
+                        # Update progress with original chapter number for better user feedback
+                        progress_callback(original_idx + 1, total_chapters)
                     
-                    # Create output file for this chapter
+                    # Create output file for this chapter using the original chapter number and title
                     base, ext = os.path.splitext(output_path)
-                    chapter_output = f"{base}_chapter{i+1}{ext}"
+                    chapter_name = chapter.get('title', f'Capítulo {original_idx + 1}').strip()
+                    # Clean the chapter name to avoid invalid filename characters
+                    chapter_name = re.sub(r'[\\/*?:"<>|]', "", chapter_name)
+                    # Include the original chapter number in the filename
+                    chapter_output = f"{base}_Cap{original_idx + 1:02d}_{chapter_name}{ext}"
                     
                     await self._convert_text(
                         chapter['content'],
