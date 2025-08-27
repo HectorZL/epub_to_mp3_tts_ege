@@ -175,107 +175,50 @@ class EPUBExtractor(BaseExtractor):
             if isinstance(content, bytes):
                 content = content.decode('utf-8', errors='replace')
             
-            # Clean up any encoding issues
-            content = content.replace('\xad', '')  # Remove soft hyphens
+            # Initial cleanup of problematic patterns that could lead to repeated characters
+            content = re.sub(r'\s*[=_-]+\s*', ' ', content)  # Clean up separators with spaces
+            content = re.sub(r'\s{2,}', ' ', content)  # Normalize spaces
             
             # Parse with BeautifulSoup
             soup = BeautifulSoup(content, 'html.parser')
             
-            # Only remove elements that are definitely not content
+            # Remove script, style, and other non-content elements
             for element in soup(['script', 'style', 'noscript', 'svg', 'iframe', 'button', 'input', 'select', 'textarea']):
                 element.decompose()
             
-            # Check for exercise content patterns
-            has_exercise_content = any(soup.find(class_=cls) for cls in ['tx1', 'h2', 'ul', 'calibre10', 'calibre11'])
+            # Process text content
+            text = soup.get_text(' ', strip=True)
             
-            # Special handling for exercise content
-            if has_exercise_content:
-                output = []
+            # Clean up the extracted text
+            lines = []
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Skip lines that are just separators or special characters
+                if re.fullmatch(r'^[=_-]{2,}$', line) or re.fullmatch(r'^[\W_]+$', line):
+                    continue
+                    
+                # Skip lines with too many repeated characters
+                if re.search(r'(.)\1{3,}', line):
+                    continue
+                    
+                # Clean up the line
+                line = re.sub(r'\s*[=_-]+\s*', ' ', line)  # Remove separators
+                line = re.sub(r'\s{2,}', ' ', line)  # Normalize spaces
                 
-                # Process headers first
-                headers = soup.find_all(class_=['h2', 'calibre10', 'calibre11'])
-                for header in headers:
-                    text = header.get_text(' ', strip=True)
-                    if text:
-                        # Add extra spacing before main headers
-                        if output and output[-1] != '':
-                            output.append('')
-                        output.append(text.upper())
-                        output.append('=' * len(text))
-                        output.append('')
-                
-                # Process all content in order
-                body = soup.find('body')
-                if body:
-                    for element in body.children:
-                        if not hasattr(element, 'name'):
-                            continue
-                            
-                        # Handle different element types
-                        if element.name == 'p':
-                            classes = element.get('class', [])
-                            text = element.get_text(' ', strip=True)
-                            
-                            if not text:
-                                continue
-                                
-                            # Handle exercise questions
-                            if 'tx1' in classes:
-                                # Check for numbered questions
-                                if re.match(r'^\d+\.', text):
-                                    output.append(text)
-                                else:
-                                    # Continuation of previous question
-                                    if output and not output[-1].startswith(('•', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '0.')):
-                                        output[-1] = f"{output[-1]} {text}"
-                                    else:
-                                        output.append(text)
-                            
-                            # Handle list items
-                            elif 'ul' in classes or element.find_parent(['ul', 'ol']):
-                                parent = element.find_parent(['ul', 'ol'])
-                                if parent:
-                                    level = len(list(parent.parents))
-                                    indent = '  ' * (level - 1)
-                                    bullet = '•' if parent.name == 'ul' else f"{1 + list(parent.children).index(element)}."
-                                    output.append(f"{indent}{bullet} {text}")
-                                else:
-                                    output.append(f"• {text}")
-                            
-                            # Other paragraphs
-                            elif text not in output:
-                                output.append(text)
-                        
-                        # Handle line breaks
-                        elif element.name == 'br' and output:
-                            output.append('')
-                
-                # Clean up empty lines and ensure proper spacing
-                cleaned_output = []
-                for i, line in enumerate(output):
-                    line = line.strip()
-                    if line:
-                        # Add spacing before new sections
-                        if line.startswith(('•', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '0.')):
-                            if cleaned_output and not cleaned_output[-1] == '':
-                                cleaned_output.append('')
-                        cleaned_output.append(line)
-                
-                return '\n'.join(cleaned_output)
+                lines.append(line)
             
-            # Fallback for non-exercise content
-            paragraphs = []
-            for p in soup.find_all(['p', 'div', 'section', 'article']):
-                text = p.get_text(' ', strip=True)
-                if text:
-                    paragraphs.append(' '.join(text.split()))
+            # Combine lines and clean up
+            cleaned_text = ' '.join(lines)
+            cleaned_text = re.sub(r'\s*([.,;:!?])\s*', r'\1 ', cleaned_text)  # Fix punctuation spacing
+            cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()  # Final cleanup
             
-            return '\n\n'.join(paragraphs) if paragraphs else ""
+            return cleaned_text
             
         except Exception as e:
-            print(f"Error in _extract_text_from_html: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error extracting text from HTML: {e}")
             return ""
 
     async def extract_text(self, file_path: str) -> List[Dict[str, Any]]:
