@@ -22,8 +22,9 @@ class AudioConverter:
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> bool:
         """Convert text to speech and save as MP3"""
-        if not text.strip():
-            raise ValueError("El texto está vacío")
+        # Clean and validate input text
+        if not text or not text.strip():
+            raise ValueError("El texto está vacío o solo contiene espacios en blanco")
             
         if not voice_name:
             raise ValueError("No se ha seleccionado una voz")
@@ -43,9 +44,17 @@ class AudioConverter:
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir, exist_ok=True)
             
+            # Clean the text and ensure it has valid content
+            text = text.strip()
+            if not text:
+                raise ValueError("El texto está vacío después de limpiar")
+                
             # Split text into smaller chunks to handle large texts
             chunks = self._split_into_chunks(text)
             total_chunks = len(chunks)
+            
+            if not chunks:
+                raise ValueError("No se pudo dividir el texto en fragmentos válidos")
             
             # Temporary files for chunks
             temp_files = []
@@ -62,30 +71,52 @@ class AudioConverter:
                     self._cleanup_temp_files(temp_files)
                     return False
                 
+                # Skip empty chunks
+                if not chunk or not chunk.strip():
+                    continue
+                    
                 # Create temp file for this chunk
                 temp_file = f"temp_chunk_{i}.mp3"
                 temp_files.append(temp_file)
                 
-                # Convert chunk to speech
-                communicate = edge_tts.Communicate(
-                    text=chunk,
-                    voice=voice['Name'],
-                    rate="+0%",
-                    volume="+0%"
-                )
-                
-                # Save chunk to temp file
-                await communicate.save(temp_file)
-                
-                # Update progress
-                if progress_callback:
-                    progress_callback(i, total_chunks)
+                try:
+                    # Convert chunk to speech
+                    communicate = edge_tts.Communicate(
+                        text=chunk,
+                        voice=voice['Name'],
+                        rate="+0%",
+                        volume="+0%"
+                    )
+                    
+                    # Save chunk to temp file with timeout
+                    try:
+                        await asyncio.wait_for(communicate.save(temp_file), timeout=300)  # 5 minute timeout
+                    except asyncio.TimeoutError:
+                        raise Exception("Tiempo de espera agotado al generar el audio. Intente con un texto más corto.")
+                    
+                    # Verify the output file was created and has content
+                    if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
+                        raise Exception(f"No se recibió audio para el fragmento {i}. Intente nuevamente.")
+                    
+                    # Update progress
+                    if progress_callback:
+                        progress_callback(i, total_chunks)
+                        
+                except Exception as e:
+                    # Clean up any partial files before re-raising
+                    self._cleanup_temp_files(temp_files)
+                    raise Exception(f"Error procesando el fragmento {i}/{total_chunks}: {str(e)}")
+            
+            # If no valid chunks were processed
+            if not temp_files:
+                raise ValueError("No se pudo generar ningún fragmento de audio válido")
             
             # Combine all chunks into the final file
             self._combine_audio_files(temp_files, output_file)
             
-            # Clean up temp files
-            self._cleanup_temp_files(temp_files)
+            # Verify the final output file
+            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
+                raise Exception("No se pudo generar el archivo de audio final")
             
             return True
             
@@ -100,6 +131,7 @@ class AudioConverter:
             
         finally:
             self.is_processing = False
+            self._cleanup_temp_files(temp_files)
     
     async def convert_file(
         self,

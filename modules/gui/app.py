@@ -251,23 +251,13 @@ class TextToSpeechApp(ctk.CTk):
         )
         self.convert_btn.pack(side=tk.LEFT, padx=5)
         
-        self.pause_btn = ctk.CTkButton(
-            self.buttons_frame,
-            text="Pausar",
-            command=self.toggle_pause,
-            height=40,
-            state=tk.DISABLED
-        )
-        self.pause_btn.pack(side=tk.LEFT, padx=5)
-        
         self.cancel_btn = ctk.CTkButton(
             self.buttons_frame,
             text="Cancelar",
             command=self.cancel_conversion,
             height=40,
             fg_color="#8B0000",
-            hover_color="#A52A2A",
-            state=tk.DISABLED
+            hover_color="#A52A2A"
         )
         self.cancel_btn.pack(side=tk.LEFT, padx=5)
         
@@ -446,17 +436,6 @@ class TextToSpeechApp(ctk.CTk):
             output_name = f"{Path(filename).stem}.mp3"
             self.output_file = str(Path(filename).parent / output_name)
     
-    def toggle_pause(self):
-        """Toggle pause/resume of the current conversion"""
-        if self.audio_converter.is_paused:
-            self.audio_converter.resume()
-            self.pause_btn.configure(text="Pausar")
-            self.status_var.set("Reanudando conversión...")
-        else:
-            self.audio_converter.pause()
-            self.pause_btn.configure(text="Reanudar")
-            self.status_var.set("Conversión en pausa...")
-    
     def cancel_conversion(self):
         """Cancel the current conversion"""
         if messagebox.askyesno("Confirmar", "¿Estás seguro de que deseas cancelar la conversión?"):
@@ -496,8 +475,7 @@ class TextToSpeechApp(ctk.CTk):
             self.lang_dropdown.configure(state=tk.DISABLED)
             self.gender_dropdown.configure(state=tk.DISABLED)
             self.chapter_btn.configure(state=tk.DISABLED)
-            self.pause_btn.configure(state=tk.NORMAL)
-            self.cancel_btn.configure(state=tk.NORMAL)
+            self.cancel_btn.configure(state=tk.NORMAL)  # Enable cancel button during processing
         else:
             self.convert_btn.configure(state=tk.NORMAL)
             self.browse_btn.configure(state=tk.NORMAL)
@@ -505,8 +483,7 @@ class TextToSpeechApp(ctk.CTk):
             self.lang_dropdown.configure(state="readonly")
             self.gender_dropdown.configure(state="readonly")
             self.chapter_btn.configure(state=tk.NORMAL if self.input_file else tk.DISABLED)
-            self.pause_btn.configure(state=tk.DISABLED, text="Pausar")
-            self.cancel_btn.configure(state=tk.DISABLED)
+            self.cancel_btn.configure(state=tk.NORMAL)  # Keep cancel button enabled by default
     
     def run_conversion(self):
         """Run the conversion process in a background thread"""
@@ -701,24 +678,27 @@ class TextToSpeechApp(ctk.CTk):
         # Ensure we're updating the UI in the main thread
         def update_ui():
             try:
-                # Update progress bar
-                progress = current / total if total > 0 else 0
-                self.progress_bar.set(progress)
-                
-                # Update chapter information
-                if chapter > 0:
-                    self.current_chapter = chapter
-                    if hasattr(self, 'total_chapters'):
-                        self.chapter_label.configure(text=f"Capítulo: {self.current_chapter}/{self.total_chapters}")
-                
-                # Update character information
-                if total_chars > 0:
+                # Update progress bar based on characters if available, otherwise use chapter progress
+                if total_chars > 0 and current_chars > 0:
+                    progress = current_chars / total_chars
+                    self.progress_bar.set(progress)
+                    
+                    # Update character information
                     self.processed_characters = current_chars
                     self.total_characters = total_chars
                     percent = (current_chars / total_chars * 100) if total_chars > 0 else 0
                     self.char_label.configure(
                         text=f"Caracteres: {current_chars:,}/{total_chars:,} ({percent:.1f}%)"
                     )
+                    
+                    # Update chapter information based on character progress
+                    if hasattr(self, 'total_chapters') and self.total_chapters > 0:
+                        # Calculate current chapter based on character progress
+                        if total > 0:
+                            chapter_progress = current / total
+                            current_chapter = min(self.total_chapters, max(1, int(chapter_progress * self.total_chapters) + 1))
+                            self.current_chapter = current_chapter
+                            self.chapter_label.configure(text=f"Capítulo: {self.current_chapter}/{self.total_chapters}")
                 
                 # Update status
                 if hasattr(self, 'status_var'):
