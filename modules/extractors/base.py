@@ -1,33 +1,43 @@
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
+import asyncio
 
 class BaseExtractor(ABC):
     """Base class for all text extractors"""
     
-    @classmethod
     @abstractmethod
-    def supports_file(cls, file_path: str) -> bool:
-        """Check if this extractor supports the given file type"""
+    async def extract_text(self, file_path: str) -> Union[str, List[Dict[str, Any]]]:
+        """Extract text from the file
+        
+        Returns:
+            Either a string with all text or a list of dictionaries with 'title' and 'content' for each chapter
+        """
         pass
     
-    @abstractmethod
-    async def extract_text(self, file_path: str) -> str:
-        """Extract text from the given file"""
-        pass
-
-
-extractors = {}
-
-def register_extractor(extractor_class):
-    """Decorator to register extractor classes"""
-    extractors[extractor_class.__name__] = extractor_class
-    return extractor_class
-
-
-def get_extractor(file_path: str) -> Optional[BaseExtractor]:
-    """Get the appropriate extractor for the given file"""
-    for extractor_class in extractors.values():
-        if extractor_class.supports_file(file_path):
-            return extractor_class()
-    return None
+    async def get_chapters(self, file_path: str) -> List[str]:
+        """Get chapter information from the file.
+        Returns a list of chapter titles.
+        """
+        result = await self.extract_text(file_path)
+        if isinstance(result, list):
+            return [chap.get('title', f'Chapter {i+1}') for i, chap in enumerate(result)]
+        return []
+    
+    async def extract_chapter(self, file_path: str, chapter_index: int) -> Optional[str]:
+        """Extract text for a specific chapter"""
+        result = await self.extract_text(file_path)
+        if isinstance(result, list) and 0 <= chapter_index < len(result):
+            return result[chapter_index].get('content')
+        return None
+    
+    @staticmethod
+    def clean_text(text: str) -> str:
+        """Clean up text by removing extra whitespace and normalizing newlines"""
+        if not text:
+            return ""
+            
+        # Replace multiple whitespace with single space
+        text = ' '.join(text.split())
+        # Normalize newlines
+        text = '\n'.join(line.strip() for line in text.splitlines() if line.strip())
+        return text
