@@ -76,6 +76,15 @@ class EPUBExtractor(BaseExtractor):
         
         return name.strip() or "Untitled"
 
+    def _extract_chapter_number(self, filename: str) -> int:
+        """Extract chapter number from filename for sorting"""
+        # Try to extract number from patterns like 0001_0000 or _0001_
+        match = re.search(r'(?:^|_)(\d{4})(?:_|$)', filename)
+        if match:
+            return int(match.group(1))
+        # For files without numbers, put them at the end
+        return 9999
+
     async def _parse_ncx(self, zf: zipfile.ZipFile):
         """Parse the NCX file to get the table of contents"""
         try:
@@ -239,6 +248,10 @@ class EPUBExtractor(BaseExtractor):
                 if self.ncx_path and self.ncx_path in zf.namelist():
                     await self._parse_ncx(zf)
                 
+                # Sort chapters by their numeric identifier
+                if self.toc:
+                    self.toc.sort(key=lambda x: self._extract_chapter_number(x['file']))
+                
                 # Process chapters based on TOC
                 if self.toc:
                     print(f"\nFound {len(self.toc)} chapters in TOC:")
@@ -255,8 +268,11 @@ class EPUBExtractor(BaseExtractor):
                         related_files = [f for f in html_files.keys() 
                                       if self._get_chapter_key(f) == chapter_key]
                         
-                        # Sort files to ensure consistent order
-                        related_files.sort()
+                        # Sort files to ensure consistent order (numerically)
+                        related_files.sort(key=lambda x: (
+                            self._extract_chapter_number(x),
+                            x  # Secondary sort by filename
+                        ))
                         
                         print(f"Related files: {', '.join(related_files)}")
                         
@@ -286,27 +302,42 @@ class EPUBExtractor(BaseExtractor):
                 # If no TOC or no chapters found, fall back to spine items
                 if not chapters and self.spine:
                     print("\nNo TOC found, falling back to spine items...")
+                    spine_items = []
                     for i, item_id in enumerate(self.spine, 1):
                         if item_id in self.manifest:
                             item = self.manifest[item_id]
                             item_path = item['href']
-                            
-                            if item_path in zf.namelist():
-                                try:
-                                    print(f"\nProcessing spine item {i}: {os.path.basename(item_path)}")
-                                    content = zf.read(item_path)
-                                    text = await self._extract_text_from_html(content)
-                                    if text:
-                                        print(f"  - {os.path.basename(item_path)}: {len(text)} characters")
-                                        chapters.append({
-                                            'title': f'Chapter {i:02d}',
-                                            'content': text,
-                                            'file': item_path
-                                        })
-                                    else:
-                                        print(f"  - {os.path.basename(item_path)}: No text extracted")
-                                except Exception as e:
-                                    print(f"  - Error processing {os.path.basename(item_path)}: {str(e)}")
+                            spine_items.append((i, item_path))
+                    
+                    # Sort spine items by their numeric identifier
+                    spine_items.sort(key=lambda x: self._extract_chapter_number(x[1]))
+                    
+                    for i, (spine_num, item_path) in enumerate(spine_items, 1):
+                        if item_path in zf.namelist():
+                            try:
+                                print(f"\nProcessing spine item {i}: {os.path.basename(item_path)}")
+                                content = zf.read(item_path)
+                                text = await self._extract_text_from_html(content)
+                                if text:
+                                    print(f"  - {os.path.basename(item_path)}: {len(text)} characters")
+                                    chapters.append({
+                                        'title': f'Chapter {i:02d}',
+                                        'content': text,
+                                        'file': item_path
+                                    })
+                                else:
+                                    print(f"  - {os.path.basename(item_path)}: No text extracted")
+                            except Exception as e:
+                                print(f"  - Error processing {os.path.basename(item_path)}: {str(e)}")
+            
+            # Final sort of all chapters by their numeric identifier
+            chapters.sort(key=lambda x: self._extract_chapter_number(x['file']))
+            
+            # Renumber chapters after sorting
+            for i, chapter in enumerate(chapters, 1):
+                chapter['title'] = re.sub(r'^\d+\s*[-.]?\s*', '', str(chapter['title']))  # Remove any existing numbers
+                if not re.match(r'^\d', chapter['title']):  # If title doesn't start with a number
+                    chapter['title'] = f"{i:02d} - {chapter['title']}"
             
             print(f"\nSuccessfully extracted {len(chapters)} chapters with content")
             return chapters
