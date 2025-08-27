@@ -539,18 +539,25 @@ class TextToSpeechApp(ctk.CTk):
                 raise ValueError("No se pudo extraer contenido del archivo")
             
             # Handle both string and chapter-based content
-            if isinstance(content, str):
-                # Single file conversion
+            if isinstance(content, str) or not hasattr(self, 'selected_chapters') or self.selected_chapters is None:
+                # Single file conversion - combine all content
+                if isinstance(content, list):
+                    # Combine all chapter contents
+                    combined_content = '\n\n'.join(
+                        chapter.get('content', '') if isinstance(chapter, dict) else str(chapter)
+                        for chapter in content
+                    )
+                else:
+                    combined_content = content
+                
                 await self.audio_converter.convert_text_to_speech(
-                    content,
+                    combined_content,
                     voice_name,
                     output_file,
                     progress_callback=self.progress_callback
                 )
             elif isinstance(content, list) and content:
-                # Chapter-based conversion
-                total_chapters = len(content)
-                
+                # Chapter-based conversion - process each chapter separately
                 # Filter chapters if selection exists
                 if hasattr(self, 'selected_chapters') and self.selected_chapters is not None:
                     content = [content[i] for i in self.selected_chapters 
@@ -567,8 +574,9 @@ class TextToSpeechApp(ctk.CTk):
                     chapter_output = f"{base}_chapter{i+1}{ext}"
                     
                     # Convert this chapter
+                    chapter_content = chapter.get('content', '') if isinstance(chapter, dict) else str(chapter)
                     await self.audio_converter.convert_text_to_speech(
-                        chapter.get('content', ''),
+                        chapter_content,
                         voice_name,
                         chapter_output,
                         progress_callback=lambda current, total, i=i: 
