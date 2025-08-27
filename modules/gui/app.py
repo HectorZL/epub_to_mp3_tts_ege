@@ -579,6 +579,18 @@ class TextToSpeechApp(ctk.CTk):
             if not content:
                 raise ValueError("No se pudo extraer contenido del archivo")
             
+            # Calculate total chapters and characters
+            if isinstance(content, list):
+                self.total_chapters = len(content)
+                total_chars = sum(
+                    len(chapter.get('content', '') if isinstance(chapter, dict) else str(chapter))
+                    for chapter in content
+                )
+                self.after(0, lambda: self.update_progress_ui(total_chapters=self.total_chapters, total_chars=total_chars))
+            else:
+                total_chars = len(content)
+                self.after(0, lambda: self.update_progress_ui(total_chars=total_chars))
+            
             # Handle both string and chapter-based content
             if isinstance(content, str) or not hasattr(self, 'selected_chapters') or self.selected_chapters is None:
                 # Single file conversion - combine all content
@@ -617,15 +629,10 @@ class TextToSpeechApp(ctk.CTk):
                 if hasattr(self, 'selected_chapters') and self.selected_chapters is not None:
                     content = [content[i] for i in self.selected_chapters 
                              if 0 <= i < len(content)]
+                    self.total_chapters = len(content)
+                    self.after(0, lambda: self.update_progress_ui(total_chars=total_chars))
                 
-                self.total_chapters = len(content)
                 self.current_chapter = 0
-                
-                # Calculate total characters for all chapters
-                total_chars = sum(
-                    len(chapter.get('content', '') if isinstance(chapter, dict) else str(chapter))
-                    for chapter in content
-                )
                 
                 # Convert each chapter
                 for i, chapter in enumerate(content):
@@ -640,11 +647,10 @@ class TextToSpeechApp(ctk.CTk):
                         len(c.get('content', '') if isinstance(c, dict) else str(c))
                         for c in content[:i]
                     )
-                    self.after(0, lambda i=i, total=len(content), total_chars=total_chars, 
-                        current_chars=processed_before: 
+                    self.after(0, lambda i=i, total=len(content), current_chars=processed_before: 
                         self.progress_callback(
                             i, 
-                            len(content),
+                            total,
                             current_chars,
                             total_chars,
                             i + 1
@@ -670,7 +676,7 @@ class TextToSpeechApp(ctk.CTk):
                                 i + (current/total if total > 0 else 0), 
                                 len(content),
                                 processed_before + int((current/total) * chapter_chars) if total > 0 else 0,
-                                sum(len(c.get('content', '') if isinstance(c, dict) else str(c)) for c in content),
+                                total_chars,
                                 i + 1
                             )
                     )
@@ -678,38 +684,55 @@ class TextToSpeechApp(ctk.CTk):
         except Exception as e:
             raise Exception(f"Error en la conversión: {str(e)}")
     
+    def update_progress_ui(self, total_chapters=0, total_chars=0):
+        """Update the progress UI with total information"""
+        if total_chapters > 0:
+            self.total_chapters = total_chapters
+            self.chapter_label.configure(text=f"Capítulo: 0/{self.total_chapters}")
+        
+        if total_chars > 0:
+            self.total_characters = total_chars
+            self.char_label.configure(text=f"Caracteres: 0/{total_chars:,} (0%)")
+    
     def progress_callback(self, current: float, total: int, current_chars: int = 0, total_chars: int = 0, chapter: int = 0):
         """Update progress bar and status with detailed information"""
         # Ensure we're updating the UI in the main thread
         def update_ui():
-            # Update progress bar
-            progress = current / total if total > 0 else 0
-            self.progress_bar.set(progress)
-            
-            # Update chapter information
-            if chapter > 0:
-                self.current_chapter = chapter
-                self.total_chapters = int(total) if total > 0 else 0
-                self.chapter_label.configure(text=f"Capítulo: {self.current_chapter}/{self.total_chapters}")
-            
-            # Update character information
-            if total_chars > 0:
-                self.processed_characters = current_chars
-                self.total_characters = total_chars
-                percent = (current_chars / total_chars * 100) if total_chars > 0 else 0
-                self.char_label.configure(
-                    text=f"Caracteres: {current_chars:,}/{total_chars:,} ({percent:.1f}%)"
-                )
-            
-            # Update status
-            if hasattr(self, 'status_var'):
-                if self.total_chapters > 0:
-                    self.status_var.set(
-                        f"Procesando capítulo {self.current_chapter} de {self.total_chapters}... "
-                        f"({self.processed_characters:,}/{self.total_characters:,} caracteres)"
+            try:
+                # Update progress bar
+                progress = current / total if total > 0 else 0
+                self.progress_bar.set(progress)
+                
+                # Update chapter information
+                if chapter > 0:
+                    self.current_chapter = chapter
+                    if hasattr(self, 'total_chapters'):
+                        self.chapter_label.configure(text=f"Capítulo: {self.current_chapter}/{self.total_chapters}")
+                
+                # Update character information
+                if total_chars > 0:
+                    self.processed_characters = current_chars
+                    self.total_characters = total_chars
+                    percent = (current_chars / total_chars * 100) if total_chars > 0 else 0
+                    self.char_label.configure(
+                        text=f"Caracteres: {current_chars:,}/{total_chars:,} ({percent:.1f}%)"
                     )
-                else:
-                    self.status_var.set(f"Procesando... {int(current)} de {int(total)}")
+                
+                # Update status
+                if hasattr(self, 'status_var'):
+                    if hasattr(self, 'total_chapters') and self.total_chapters > 0:
+                        self.status_var.set(
+                            f"Procesando capítulo {self.current_chapter} de {self.total_chapters}... "
+                            f"({self.processed_characters:,}/{self.total_characters:,} caracteres)"
+                        )
+                    else:
+                        self.status_var.set(f"Procesando... {int(current)} de {int(total)}")
+                        
+                # Force update the UI
+                self.update_idletasks()
+                
+            except Exception as e:
+                print(f"Error updating UI: {e}")
         
         # Schedule the UI update on the main thread
         self.after(0, update_ui)
