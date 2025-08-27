@@ -120,6 +120,13 @@ class TextToSpeechApp(ctk.CTk):
         self.conversion_thread: Optional[threading.Thread] = None
         self.selected_chapters: Optional[List[int]] = None
         
+        # Progress tracking
+        self.show_detailed_progress = False
+        self.current_chapter = 0
+        self.total_chapters = 0
+        self.total_characters = 0
+        self.processed_characters = 0
+        
         # Configure grid
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -268,12 +275,43 @@ class TextToSpeechApp(ctk.CTk):
         self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.progress_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=10)
         
-        self.progress_label = ctk.CTkLabel(self.progress_frame, text="")
-        self.progress_label.pack(fill=tk.X, pady=5)
-        
+        # Main progress bar
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame, mode="determinate")
         self.progress_bar.pack(fill=tk.X, pady=5)
         self.progress_bar.set(0)
+        
+        # Toggle button for detailed progress
+        self.toggle_btn = ctk.CTkButton(
+            self.progress_frame,
+            text="▼ Mostrar detalles de progreso",
+            font=("Arial", 10),
+            fg_color="transparent",
+            hover_color=("#f0f0f0", "#2b2b2b"),
+            text_color=("gray10", "gray90"),
+            command=self.toggle_detailed_progress,
+            width=200,
+            height=20
+        )
+        self.toggle_btn.pack(pady=(5, 0))
+        
+        # Detailed progress frame (initially hidden)
+        self.detailed_frame = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
+        
+        # Chapter progress
+        self.chapter_label = ctk.CTkLabel(
+            self.detailed_frame,
+            text="Capítulo: 0/0",
+            anchor="w"
+        )
+        self.chapter_label.pack(fill=tk.X, pady=2)
+        
+        # Character progress
+        self.char_label = ctk.CTkLabel(
+            self.detailed_frame,
+            text="Caracteres: 0/0 (0%)",
+            anchor="w"
+        )
+        self.char_label.pack(fill=tk.X, pady=2)
         
         # Status bar
         self.status_var = tk.StringVar(value="Listo")
@@ -527,6 +565,9 @@ class TextToSpeechApp(ctk.CTk):
     async def _convert_file(self, input_file: str, output_file: str, voice_name: str):
         """Convert the file using the audio converter"""
         try:
+            # Reset progress tracking at start of conversion
+            self.after(0, self.reset_ui_state)
+            
             # Get the extractor for the file type
             extractor = get_extractor(input_file)
             if not extractor:
@@ -542,19 +583,33 @@ class TextToSpeechApp(ctk.CTk):
             if isinstance(content, str) or not hasattr(self, 'selected_chapters') or self.selected_chapters is None:
                 # Single file conversion - combine all content
                 if isinstance(content, list):
-                    # Combine all chapter contents
                     combined_content = '\n\n'.join(
                         chapter.get('content', '') if isinstance(chapter, dict) else str(chapter)
                         for chapter in content
                     )
+                    total_chars = sum(
+                        len(chapter.get('content', '') if isinstance(chapter, dict) else str(chapter))
+                        for chapter in content
+                    )
                 else:
                     combined_content = content
+                    total_chars = len(combined_content)
+                
+                # Update total characters
+                self.after(0, lambda: self.progress_callback(0, 1, 0, total_chars, 1))
                 
                 await self.audio_converter.convert_text_to_speech(
                     combined_content,
                     voice_name,
                     output_file,
-                    progress_callback=self.progress_callback
+                    progress_callback=lambda current, total, chars=0, total_chars=total_chars: 
+                        self.progress_callback(
+                            current/total if total > 0 else 0, 
+                            1, 
+                            int((current/total) * total_chars) if total > 0 else 0, 
+                            total_chars,
+                            1
+                        )
                 )
             elif isinstance(content, list) and content:
                 # Chapter-based conversion - process each chapter separately
@@ -563,42 +618,133 @@ class TextToSpeechApp(ctk.CTk):
                     content = [content[i] for i in self.selected_chapters 
                              if 0 <= i < len(content)]
                 
+                self.total_chapters = len(content)
+                self.current_chapter = 0
+                
+                # Calculate total characters for all chapters
+                total_chars = sum(
+                    len(chapter.get('content', '') if isinstance(chapter, dict) else str(chapter))
+                    for chapter in content
+                )
+                
                 # Convert each chapter
                 for i, chapter in enumerate(content):
-                    # Update progress
-                    self.after(0, lambda i=i, total=len(content): 
-                              self.progress_callback(i, total))
+                    self.current_chapter = i + 1
+                    
+                    # Get chapter content and character count
+                    chapter_content = chapter.get('content', '') if isinstance(chapter, dict) else str(chapter)
+                    chapter_chars = len(chapter_content)
+                    
+                    # Update progress for new chapter
+                    processed_before = sum(
+                        len(c.get('content', '') if isinstance(c, dict) else str(c))
+                        for c in content[:i]
+                    )
+                    self.after(0, lambda i=i, total=len(content), total_chars=total_chars, 
+                        current_chars=processed_before: 
+                        self.progress_callback(
+                            i, 
+                            len(content),
+                            current_chars,
+                            total_chars,
+                            i + 1
+                        )
+                    )
                     
                     # Create output filename for chapter
                     base, ext = os.path.splitext(output_file)
-                    chapter_output = f"{base}_chapter{i+1}{ext}"
+                    chapter_output = f"{base}_capitulo{self.current_chapter}{ext}"
                     
                     # Convert this chapter
-                    chapter_content = chapter.get('content', '') if isinstance(chapter, dict) else str(chapter)
+                    processed_before = sum(
+                        len(c.get('content', '') if isinstance(c, dict) else str(c))
+                        for c in content[:i]
+                    )
                     await self.audio_converter.convert_text_to_speech(
                         chapter_content,
                         voice_name,
                         chapter_output,
-                        progress_callback=lambda current, total, i=i: 
-                            self.progress_callback(i + (current/total), len(content))
+                        progress_callback=lambda current, total, i=i, chapter_chars=chapter_chars, 
+                            processed_before=processed_before: 
+                            self.progress_callback(
+                                i + (current/total if total > 0 else 0), 
+                                len(content),
+                                processed_before + int((current/total) * chapter_chars) if total > 0 else 0,
+                                sum(len(c.get('content', '') if isinstance(c, dict) else str(c)) for c in content),
+                                i + 1
+                            )
                     )
                     
         except Exception as e:
             raise Exception(f"Error en la conversión: {str(e)}")
     
-    def progress_callback(self, current: int, total: int):
-        """Update progress bar and status"""
-        if hasattr(self, 'progress_bar'):
-            self.progress_bar.set(current / total * 100)
-        if hasattr(self, 'status_label'):
-            self.status_label.configure(text=f"Procesando: {current} de {total} capítulos...")
+    def progress_callback(self, current: float, total: int, current_chars: int = 0, total_chars: int = 0, chapter: int = 0):
+        """Update progress bar and status with detailed information"""
+        # Ensure we're updating the UI in the main thread
+        def update_ui():
+            # Update progress bar
+            progress = current / total if total > 0 else 0
+            self.progress_bar.set(progress)
             
+            # Update chapter information
+            if chapter > 0:
+                self.current_chapter = chapter
+                self.total_chapters = int(total) if total > 0 else 0
+                self.chapter_label.configure(text=f"Capítulo: {self.current_chapter}/{self.total_chapters}")
+            
+            # Update character information
+            if total_chars > 0:
+                self.processed_characters = current_chars
+                self.total_characters = total_chars
+                percent = (current_chars / total_chars * 100) if total_chars > 0 else 0
+                self.char_label.configure(
+                    text=f"Caracteres: {current_chars:,}/{total_chars:,} ({percent:.1f}%)"
+                )
+            
+            # Update status
+            if hasattr(self, 'status_var'):
+                if self.total_chapters > 0:
+                    self.status_var.set(
+                        f"Procesando capítulo {self.current_chapter} de {self.total_chapters}... "
+                        f"({self.processed_characters:,}/{self.total_characters:,} caracteres)"
+                    )
+                else:
+                    self.status_var.set(f"Procesando... {int(current)} de {int(total)}")
+        
+        # Schedule the UI update on the main thread
+        self.after(0, update_ui)
+
+    def toggle_detailed_progress(self):
+        """Toggle the visibility of the detailed progress section"""
+        if self.show_detailed_progress:
+            self.detailed_frame.pack_forget()
+            self.toggle_btn.configure(text="▼ Mostrar detalles de progreso")
+        else:
+            self.detailed_frame.pack(fill=tk.X, pady=(5, 0))
+            self.toggle_btn.configure(text="▲ Ocultar detalles de progreso")
+        self.show_detailed_progress = not self.show_detailed_progress
+
+    def reset_ui_state(self):
+        """Reset the UI to its initial state"""
+        self.progress_bar.set(0)
+        self.status_var.set("Listo")
+        self.current_chapter = 0
+        self.total_chapters = 0
+        self.processed_characters = 0
+        self.total_characters = 0
+        self.chapter_label.configure(text="Capítulo: 0/0")
+        self.char_label.configure(text="Caracteres: 0/0 (0%)")
+        self.is_processing = False
+        self.conversion_thread = None
+        self.update_ui_state()
+
     def on_conversion_complete(self):
         """Handle successful conversion"""
         self.progress_bar.set(1.0)
         self.status_var.set("¡Conversión completada con éxito!")
-        messagebox.showinfo("Éxito", 
-            f"El archivo se ha guardado como:\n{self.output_file}")
+        messagebox.showinfo("Éxito", "La conversión se ha completado correctamente.")
+        # Reset the UI after a short delay to show the success message
+        self.after(2000, self.reset_ui_state)
     
     def on_conversion_error(self, error_msg: str):
         """Handle conversion errors"""
