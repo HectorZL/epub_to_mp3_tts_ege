@@ -312,6 +312,43 @@ class TextToSpeechApp(ctk.CTk):
             height=20
         )
         self.status_bar.grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
+        
+        # Add GitHub footer
+        self.footer_frame = ctk.CTkFrame(self, height=20, fg_color="transparent")
+        self.footer_frame.grid(row=2, column=0, sticky="sew", padx=10, pady=(0, 5))
+        
+        # Make the footer expand with the window
+        self.grid_rowconfigure(2, weight=0)
+        
+        # Add developer credit
+        self.dev_credit = ctk.CTkLabel(
+            self.footer_frame,
+            text="Desarrollado por WHITE with ❤",
+            text_color=("#666666", "#999999"),
+            font=("Arial", 10, "italic")
+        )
+        self.dev_credit.pack(side=tk.LEFT)
+        
+        # Add GitHub link
+        self.github_link = ctk.CTkLabel(
+            self.footer_frame, 
+            text="GitHub",
+            text_color=("#1a73e8", "#8ab4f8"),
+            cursor="hand2",
+            font=("Arial", 10, "underline")
+        )
+        self.github_link.pack(side=tk.RIGHT)
+        self.github_link.bind("<Button-1>", lambda e: self.open_github())
+        
+        # Add some padding between credit and GitHub link
+        self.footer_frame.grid_columnconfigure(1, weight=1)
+        
+        # Make the main content expandable
+        self.grid_rowconfigure(1, weight=1)
+    
+    def open_github(self):
+        import webbrowser
+        webbrowser.open("https://github.com/HectorZL")
     
     def on_language_changed(self, event=None):
         """Update voice list when language changes"""
