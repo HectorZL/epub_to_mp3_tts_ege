@@ -1,59 +1,60 @@
 # Conversor de Libros a Audio
 
-Aplicación de escritorio para convertir archivos PDF y EPUB a archivos de audio MP3 utilizando la tecnología de texto a voz de Microsoft Edge.
+Aplicación de escritorio para convertir archivos PDF y EPUB a archivos de audio MP3. Soporta tanto síntesis online (Microsoft Edge TTS) como offline (Piper TTS).
 
 ## Características
 
-- Interfaz gráfica moderna y fácil de usar
-- Soporte para archivos PDF y EPUB
-- Selección de diferentes voces disponibles
-- Procesamiento por lotes (convierte libros completos)
-- Barra de progreso para seguir el avance de la conversión
+- Interfaz gráfica moderna y fácil de usar (Tema oscuro adaptativo)
+- Soporte para archivos `.pdf` y `.epub`
+- Conversión por capítulos (permite seleccionar la conversión de partes específicas del libro)
+- **Modo Online**: Utiliza las voces neuronales de alta calidad de Microsoft Edge TTS (requiere conexión a internet activa para sintetizar).
+- **Modo Offline**: Utiliza Piper TTS para generación de audio local de altísima velocidad y sin requerir internet. Al seleccionar este modo, la app descarga el modelo una sola vez y lo procesa en local de forma ilimitada y sin bloqueos de red.
+- Procesamiento por lotes y barra de progreso detallada.
 
 ## Requisitos
 
-- Python 3.7 o superior
-- Conexión a Internet (para descargar las voces de Microsoft Edge)
+- Python 3.7+
+- (Recomendado) `ffmpeg` para acelerar la conversión final a MP3 en el modo Offline.
 
 ## Instalación
 
-1. Clona este repositorio o descarga los archivos
+1. Clona este repositorio o descarga los archivos.
 2. Crea un entorno virtual (recomendado):
-   ```
-   python -m venv venv
-   venv\Scripts\activate  # En Windows
-   source venv/bin/activate  # En Linux/Mac
+   ```bash
+   python -m venv .venv
+   
+   # En Windows:
+   .venv\Scripts\activate
    ```
 3. Instala las dependencias:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 
 ## Uso
 
 1. Ejecuta la aplicación:
-   ```
+   ```bash
    python main.py
    ```
-2. Haz clic en "Examinar..." para seleccionar un archivo PDF o EPUB
-3. Selecciona una voz del menú desplegable
-4. Haz clic en "Convertir a MP3"
-5. Espera a que se complete la conversión
-6. El archivo de audio se guardará en la misma carpeta que el archivo de origen con extensión .mp3
+2. **Selecciona el Motor TTS:**
+   - **Online (edge-tts):** Selecciona el idioma, el género y la voz en la nube de Edge que más te guste.
+   - **Offline (Piper):** Selecciona el idioma y elige una de las voces locales. Si no tienes alojado el modelo aún, pulsa "Descargar modelo".
+3. Haz clic en **Examinar...** para seleccionar un archivo PDF o EPUB.
+4. Opcionalmente, usa **"Seleccionar Capítulos"** para omitir partes del libro.
+5. Haz clic en **"Convertir a MP3"**. Se generará el audio en el mismo directorio del archivo original.
 
-## Notas
+## Compilar Ejecutable (Windows)
 
-- La primera vez que se ejecuta la aplicación, puede tardar unos segundos en cargar las voces disponibles
-- Los archivos grandes pueden tardar varios minutos en procesarse
-- La calidad del audio depende de la voz seleccionada
+Si deseas empaquetarlo en un solitario archivo `.exe` para no requerir tener Python instalado en el uso diario:
 
-## Solución de problemas
+```bash
+python build.py
+```
+*(Durante la compilación la app instalará PyInstaller automáticamente y firmará el ejecutable de forma local si estás en Windows 10/11).*
 
-Si la aplicación no se inicia correctamente, asegúrate de que:
-- Tienes instaladas todas las dependencias
-- Tienes conexión a Internet para cargar las voces
-- Tienes permisos de escritura en la carpeta de destino
+El binario resultante se encontrará en la carpeta `dist/`. Ten en cuenta que si usas el modo offline, la aplicación descargará los modelos de Piper en una carpeta local llamada `piper_models/` adyacente a donde se ejecute.
 
 ## Licencia
 
-Este proyecto está bajo la Licencia MIT. Ver el archivo LICENSE para más detalles.
+Este proyecto está bajo la Licencia MIT.

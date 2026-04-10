@@ -2,3 +2,5 @@ customtkinter>=5.2.0
 edge-tts>=7.2.1
 PyPDF2>=3.0.0
 EbookLib>=0.18.0
+piper-tts>=1.4.0
+soundfile>=0.13.0

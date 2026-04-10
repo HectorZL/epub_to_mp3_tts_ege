@@ -1,14 +1,17 @@
 import asyncio
 import os
 import re
+import tempfile
 from typing import Optional, Callable, List, Dict, Any
 import edge_tts
 
 from modules.utils.voice_manager import VoiceManager
 
 class AudioConverter:
-    def __init__(self, voice_manager: VoiceManager):
+    def __init__(self, voice_manager: VoiceManager, piper_manager=None):
         self.voice_manager = voice_manager
+        self.piper_manager = piper_manager
+        self.engine_mode = "online"   # 'online' | 'offline'
         self.is_processing = False
         self.is_paused = False
         self.is_cancelled = False
@@ -34,10 +37,14 @@ class AudioConverter:
         self.is_cancelled = False
         
         try:
-            # Get the full voice details
-            voice = self.voice_manager.get_voice_by_name(voice_name)
-            if not voice:
-                raise ValueError(f"Voz no encontrada: {voice_name}")
+            # Get the full voice details (only needed for edge-tts)
+            if self.engine_mode == "offline":
+                voice = {"Name": voice_name}  # Piper usa el nombre directamente
+            else:
+                voice = self.voice_manager.get_voice_by_name(voice_name)
+                if not voice:
+                    raise ValueError(f"Voz no encontrada: {voice_name}")
+
             
             # Create output directory if it doesn't exist
             output_dir = os.path.dirname(output_file)
@@ -80,19 +87,27 @@ class AudioConverter:
                 temp_files.append(temp_file)
                 
                 try:
-                    # Convert chunk to speech
-                    communicate = edge_tts.Communicate(
-                        text=chunk,
-                        voice=voice['Name'],
-                        rate="+0%",
-                        volume="+0%"
-                    )
-                    
-                    # Save chunk to temp file with timeout
-                    try:
-                        await asyncio.wait_for(communicate.save(temp_file), timeout=300)  # 5 minute timeout
-                    except asyncio.TimeoutError:
-                        raise Exception("Tiempo de espera agotado al generar el audio. Intente con un texto más corto.")
+                    if self.engine_mode == "offline" and self.piper_manager:
+                        # ── Piper offline ─────────────────────────────────
+                        tmp_wav = temp_file.replace(".mp3", ".wav")
+                        self.piper_manager.synthesize(chunk, voice_name, tmp_wav)
+                        self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                        try:
+                            os.remove(tmp_wav)
+                        except Exception:
+                            pass
+                    else:
+                        # ── edge-tts online ───────────────────────────────
+                        communicate = edge_tts.Communicate(
+                            text=chunk,
+                            voice=voice['Name'],
+                            rate="+0%",
+                            volume="+0%"
+                        )
+                        try:
+                            await asyncio.wait_for(communicate.save(temp_file), timeout=300)
+                        except asyncio.TimeoutError:
+                            raise Exception("Tiempo de espera agotado al generar el audio. Intente con un texto mas corto.")
                     
                     # Verify the output file was created and has content
                     if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
@@ -301,15 +316,35 @@ class AudioConverter:
     
     def _combine_audio_files(self, input_files: List[str], output_file: str):
         """Combine multiple audio files into one"""
-        # This is a simple implementation that just concatenates the files
-        # For better results, consider using a proper audio library like pydub
-        with open(output_file, 'wb') as outfile:
-            for fname in input_files:
-                try:
-                    with open(fname, 'rb') as infile:
-                        outfile.write(infile.read())
-                except Exception as e:
-                    print(f"Warning: Could not read {fname}: {e}")
+        if not input_files:
+            return
+
+        # Verificar si el contenido real son archivos WAV
+        is_wav = False
+        with open(input_files[0], 'rb') as f:
+            if f.read(4) == b'RIFF':
+                is_wav = True
+
+        if is_wav:
+            import wave
+            with wave.open(output_file, 'wb') as outfile:
+                for i, fname in enumerate(input_files):
+                    try:
+                        with wave.open(fname, 'rb') as infile:
+                            if i == 0:
+                                outfile.setparams(infile.getparams())
+                            outfile.writeframes(infile.readframes(infile.getnframes()))
+                    except Exception as e:
+                        print(f"Warning: Could not read {fname}: {e}")
+        else:
+            # Archivos MP3 (edge-tts) se pueden concatenar directamente uniendo bytes
+            with open(output_file, 'wb') as outfile:
+                for fname in input_files:
+                    try:
+                        with open(fname, 'rb') as infile:
+                            outfile.write(infile.read())
+                    except Exception as e:
+                        print(f"Warning: Could not read {fname}: {e}")
     
     def _cleanup_temp_files(self, files: List[str]):
         """Clean up temporary files"""

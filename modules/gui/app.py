@@ -104,14 +104,15 @@ class ChapterSelectionDialog(ctk.CTkToplevel):
         self.destroy()
 
 class TextToSpeechApp(ctk.CTk):
-    def __init__(self, voice_manager: VoiceManager, audio_converter: AudioConverter):
+    def __init__(self, voice_manager: VoiceManager, audio_converter: AudioConverter, piper_manager=None):
         super().__init__()
         
         self.voice_manager = voice_manager
         self.audio_converter = audio_converter
+        self.piper_manager = piper_manager
         
         self.title("Conversor de Libros a Audio")
-        self.geometry("900x700")
+        self.geometry("900x780")
         ctk.set_appearance_mode("dark")
         
         self.input_file = ""
@@ -119,6 +120,9 @@ class TextToSpeechApp(ctk.CTk):
         self.is_processing = False
         self.conversion_thread: Optional[threading.Thread] = None
         self.selected_chapters: Optional[List[int]] = None
+        
+        # Engine mode: 'online' | 'offline'
+        self.engine_mode = tk.StringVar(value="online")
         
         # Progress tracking
         self.show_detailed_progress = False
@@ -133,6 +137,7 @@ class TextToSpeechApp(ctk.CTk):
         
         self.setup_ui()
         self.load_voices_async()
+
     
     def load_voices_async(self):
         """Load voices in a background thread to keep the UI responsive"""
@@ -157,194 +162,327 @@ class TextToSpeechApp(ctk.CTk):
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.main_frame.grid_columnconfigure(1, weight=1)
-        
-        # Title
+
+        # ── Title ─────────────────────────────────────────────────────────────
         title_label = ctk.CTkLabel(
-            self.main_frame, 
+            self.main_frame,
             text="Conversor de Libros a Audio",
             font=("Arial", 24, "bold")
         )
         title_label.grid(row=0, column=0, columnspan=3, pady=20)
-        
-        # File selection
-        file_label = ctk.CTkLabel(self.main_frame, text="Archivo:")
-        file_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        
-        self.file_entry = ctk.CTkEntry(self.main_frame, width=400)
-        self.file_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        
-        self.browse_btn = ctk.CTkButton(
-            self.main_frame,
-            text="Examinar...",
-            command=self.browse_file
+
+        # ── Engine toggle ──────────────────────────────────────────────────────
+        engine_frame = ctk.CTkFrame(self.main_frame)
+        engine_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=(0, 8), sticky="ew")
+        engine_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(engine_frame, text="Motor TTS:", font=("Arial", 12, "bold")).grid(
+            row=0, column=0, padx=10, pady=8, sticky="w"
         )
-        self.browse_btn.grid(row=1, column=2, padx=5, pady=5)
-        
-        # Voice selection frame
-        voice_frame = ctk.CTkFrame(self.main_frame)
-        voice_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-        voice_frame.grid_columnconfigure(1, weight=1)
-        
-        # Language selection
-        lang_label = ctk.CTkLabel(voice_frame, text="Idioma:")
-        lang_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        
+
+        toggle_inner = ctk.CTkFrame(engine_frame, fg_color="transparent")
+        toggle_inner.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+        self.btn_online = ctk.CTkButton(
+            toggle_inner, text="Online (edge-tts)", width=160,
+            command=lambda: self._set_engine("online"),
+            fg_color="#1565C0", hover_color="#1976D2"
+        )
+        self.btn_online.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_offline = ctk.CTkButton(
+            toggle_inner, text="Offline (Piper)", width=160,
+            command=lambda: self._set_engine("offline"),
+            fg_color="#424242", hover_color="#616161"
+        )
+        self.btn_offline.pack(side=tk.LEFT)
+
+        self.engine_badge = ctk.CTkLabel(
+            engine_frame, text="● Online", text_color="#4CAF50",
+            font=("Arial", 11, "bold")
+        )
+        self.engine_badge.grid(row=0, column=2, padx=10)
+
+        # ── File selection ─────────────────────────────────────────────────────
+        file_label = ctk.CTkLabel(self.main_frame, text="Archivo:")
+        file_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+
+        self.file_entry = ctk.CTkEntry(self.main_frame, width=400)
+        self.file_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+
+        self.browse_btn = ctk.CTkButton(
+            self.main_frame, text="Examinar...", command=self.browse_file
+        )
+        self.browse_btn.grid(row=2, column=2, padx=5, pady=5)
+
+        # ── Online panel (edge-tts) ────────────────────────────────────────────
+        self.online_panel = ctk.CTkFrame(self.main_frame)
+        self.online_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+        self.online_panel.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self.online_panel, text="Idioma:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.lang_var = tk.StringVar()
         self.lang_dropdown = ctk.CTkComboBox(
-            voice_frame,
-            variable=self.lang_var,
+            self.online_panel, variable=self.lang_var,
             values=["Español", "Inglés", "Todos"],
-            state="readonly",
-            command=self.on_language_changed
+            state="readonly", command=self.on_language_changed
         )
-        self.lang_dropdown.set("Todos")
+        self.lang_dropdown.set("Español")
         self.lang_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        
-        # Gender selection
-        gender_label = ctk.CTkLabel(voice_frame, text="Género:")
-        gender_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        
+
+        ctk.CTkLabel(self.online_panel, text="Género:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.gender_var = tk.StringVar()
         self.gender_dropdown = ctk.CTkComboBox(
-            voice_frame,
-            variable=self.gender_var,
+            self.online_panel, variable=self.gender_var,
             values=["Masculino", "Femenino", "Todos"],
-            state="readonly",
-            command=self.on_gender_changed
+            state="readonly", command=self.on_gender_changed
         )
-        self.gender_dropdown.set("Todos")
+        self.gender_dropdown.set("Femenino")
         self.gender_dropdown.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        
-        # Voice selection
-        voice_label = ctk.CTkLabel(voice_frame, text="Voz:")
-        voice_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        
+
+        ctk.CTkLabel(self.online_panel, text="Voz:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.voice_var = tk.StringVar()
         self.voice_dropdown = ctk.CTkComboBox(
-            voice_frame,
-            variable=self.voice_var,
-            values=[],  # Will be populated async
-            state="readonly",
-            width=400
+            self.online_panel, variable=self.voice_var,
+            values=[], state="readonly", width=400
         )
         self.voice_dropdown.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-        
-        # Chapter selection button
+
+        # ── Offline panel (Piper) ──────────────────────────────────────────────
+        self.offline_panel = ctk.CTkFrame(self.main_frame)
+        # No shown by default (online is default)
+
+        ctk.CTkLabel(
+            self.offline_panel,
+            text="Piper TTS — Offline",
+            font=("Arial", 13, "bold")
+        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(8, 4), sticky="w")
+
+        ctk.CTkLabel(self.offline_panel, text="Idioma:").grid(row=1, column=0, padx=5, pady=4, sticky="w")
+        self.piper_lang_var = tk.StringVar(value="Español")
+        self.piper_lang_dropdown = ctk.CTkComboBox(
+            self.offline_panel,
+            variable=self.piper_lang_var,
+            values=["Español", "Inglés", "Todos"],
+            state="readonly",
+            command=self._update_piper_voices
+        )
+        self.piper_lang_dropdown.grid(row=1, column=1, padx=5, pady=4, sticky="w")
+
+        ctk.CTkLabel(self.offline_panel, text="Género:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
+        self.piper_gender_var = tk.StringVar(value="Femenino")
+        self.piper_gender_dropdown = ctk.CTkComboBox(
+            self.offline_panel,
+            variable=self.piper_gender_var,
+            values=["Masculino", "Femenino", "Todos"],
+            state="readonly",
+            command=self._update_piper_voices
+        )
+        self.piper_gender_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
+
+        ctk.CTkLabel(self.offline_panel, text="Voz Piper:").grid(row=3, column=0, padx=5, pady=4, sticky="w")
+        self.piper_voice_var = tk.StringVar()
+        self.piper_voice_dropdown = ctk.CTkComboBox(
+            self.offline_panel,
+            variable=self.piper_voice_var,
+            values=[], state="readonly", width=350,
+            command=self._on_piper_voice_selected
+        )
+        self.piper_voice_dropdown.grid(row=3, column=1, padx=5, pady=4, sticky="w")
+
+        self.piper_dl_btn = ctk.CTkButton(
+            self.offline_panel,
+            text="Descargar modelo",
+            width=140,
+            fg_color="#E65100",
+            hover_color="#F4511E",
+            command=self._download_piper_model
+        )
+        self.piper_dl_btn.grid(row=3, column=2, padx=5, pady=4)
+
+        self.piper_status_lbl = ctk.CTkLabel(
+            self.offline_panel,
+            text="",
+            font=("Arial", 10),
+            text_color=("#888", "#aaa")
+        )
+        self.piper_status_lbl.grid(row=4, column=0, columnspan=3, padx=5, pady=2, sticky="w")
+
+        self.piper_dl_bar = ctk.CTkProgressBar(self.offline_panel, mode="determinate")
+        self.piper_dl_bar.grid(row=5, column=0, columnspan=3, padx=5, pady=(2, 6), sticky="ew")
+        self.piper_dl_bar.set(0)
+        self.piper_dl_bar.grid_remove()   # hidden until download starts
+
+        self.offline_panel.grid_columnconfigure(1, weight=1)
+
+        # Initialize Piper voice list
+        self._update_piper_voices()
+
+        # ── Chapter selection button ───────────────────────────────────────────
         self.chapter_btn = ctk.CTkButton(
             self.main_frame,
             text="Seleccionar Capítulos",
             command=self.select_chapters,
             state=tk.DISABLED
         )
-        self.chapter_btn.grid(row=3, column=0, columnspan=3, pady=10)
-        
-        # Buttons frame
+        self.chapter_btn.grid(row=4, column=0, columnspan=3, pady=10)
+
+        # ── Action buttons ─────────────────────────────────────────────────────
         self.buttons_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.buttons_frame.grid(row=4, column=0, columnspan=3, pady=20)
-        
+        self.buttons_frame.grid(row=5, column=0, columnspan=3, pady=20)
+
         self.convert_btn = ctk.CTkButton(
-            self.buttons_frame,
-            text="Convertir a MP3",
-            command=self.start_conversion,
-            height=40,
-            font=("Arial", 14, "bold")
+            self.buttons_frame, text="Convertir a MP3",
+            command=self.start_conversion, height=40, font=("Arial", 14, "bold")
         )
         self.convert_btn.pack(side=tk.LEFT, padx=5)
-        
+
         self.cancel_btn = ctk.CTkButton(
-            self.buttons_frame,
-            text="Cancelar",
-            command=self.cancel_conversion,
-            height=40,
-            fg_color="#8B0000",
-            hover_color="#A52A2A"
+            self.buttons_frame, text="Cancelar",
+            command=self.cancel_conversion, height=40,
+            fg_color="#8B0000", hover_color="#A52A2A"
         )
         self.cancel_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Progress frame
+
+        # ── Progress ───────────────────────────────────────────────────────────
         self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.progress_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=10)
-        
-        # Main progress bar
+        self.progress_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
+
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame, mode="determinate")
         self.progress_bar.pack(fill=tk.X, pady=5)
         self.progress_bar.set(0)
-        
-        # Toggle button for detailed progress
+
         self.toggle_btn = ctk.CTkButton(
-            self.progress_frame,
-            text="▼ Mostrar detalles de progreso",
-            font=("Arial", 10),
-            fg_color="transparent",
+            self.progress_frame, text="▼ Mostrar detalles de progreso",
+            font=("Arial", 10), fg_color="transparent",
             hover_color=("#f0f0f0", "#2b2b2b"),
             text_color=("gray10", "gray90"),
-            command=self.toggle_detailed_progress,
-            width=200,
-            height=20
+            command=self.toggle_detailed_progress, width=200, height=20
         )
         self.toggle_btn.pack(pady=(5, 0))
-        
-        # Detailed progress frame (initially hidden)
+
         self.detailed_frame = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
-        
-        # Chapter progress
-        self.chapter_label = ctk.CTkLabel(
-            self.detailed_frame,
-            text="Capítulo: 0/0",
-            anchor="w"
-        )
+
+        self.chapter_label = ctk.CTkLabel(self.detailed_frame, text="Capítulo: 0/0", anchor="w")
         self.chapter_label.pack(fill=tk.X, pady=2)
-        
-        # Character progress
-        self.char_label = ctk.CTkLabel(
-            self.detailed_frame,
-            text="Caracteres: 0/0 (0%)",
-            anchor="w"
-        )
+
+        self.char_label = ctk.CTkLabel(self.detailed_frame, text="Caracteres: 0/0 (0%)", anchor="w")
         self.char_label.pack(fill=tk.X, pady=2)
-        
-        # Status bar
+
+        # ── Status bar ─────────────────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Listo")
         self.status_bar = ctk.CTkLabel(
-            self.main_frame,
-            textvariable=self.status_var,
-            anchor="w",
-            height=20
+            self.main_frame, textvariable=self.status_var, anchor="w", height=20
         )
-        self.status_bar.grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
-        
-        # Add GitHub footer
+        self.status_bar.grid(row=7, column=0, columnspan=3, sticky="ew", pady=10)
+
+        # ── Footer ─────────────────────────────────────────────────────────────
         self.footer_frame = ctk.CTkFrame(self, height=20, fg_color="transparent")
         self.footer_frame.grid(row=2, column=0, sticky="sew", padx=10, pady=(0, 5))
-        
-        # Make the footer expand with the window
         self.grid_rowconfigure(2, weight=0)
-        
-        # Add developer credit
+
         self.dev_credit = ctk.CTkLabel(
-            self.footer_frame,
-            text="Desarrollado por WHITE with ❤",
-            text_color=("#666666", "#999999"),
-            font=("Arial", 10, "italic")
+            self.footer_frame, text="Desarrollado por WHITE with ❤",
+            text_color=("#666666", "#999999"), font=("Arial", 10, "italic")
         )
         self.dev_credit.pack(side=tk.LEFT)
-        
-        # Add GitHub link
+
         self.github_link = ctk.CTkLabel(
-            self.footer_frame, 
-            text="GitHub",
+            self.footer_frame, text="GitHub",
             text_color=("#1a73e8", "#8ab4f8"),
-            cursor="hand2",
-            font=("Arial", 10, "underline")
+            cursor="hand2", font=("Arial", 10, "underline")
         )
         self.github_link.pack(side=tk.RIGHT)
         self.github_link.bind("<Button-1>", lambda e: self.open_github())
-        
-        # Add some padding between credit and GitHub link
         self.footer_frame.grid_columnconfigure(1, weight=1)
-        
-        # Make the main content expandable
         self.grid_rowconfigure(1, weight=1)
+
+    # ─── Engine toggle helpers ─────────────────────────────────────────────────
+
+    def _set_engine(self, mode: str):
+        """Switch between 'online' and 'offline' engine."""
+        self.engine_mode.set(mode)
+        self.audio_converter.engine_mode = mode
+
+        if mode == "online":
+            self.btn_online.configure(fg_color="#1565C0")
+            self.btn_offline.configure(fg_color="#424242")
+            self.engine_badge.configure(text="● Online", text_color="#4CAF50")
+            self.offline_panel.grid_remove()
+            self.online_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+        else:
+            self.btn_offline.configure(fg_color="#E65100")
+            self.btn_online.configure(fg_color="#424242")
+            self.engine_badge.configure(text="● Offline", text_color="#FF9800")
+            self.online_panel.grid_remove()
+            self.offline_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+    # ─── Piper panel helpers ───────────────────────────────────────────────────
+
+    def _update_piper_voices(self, event=None):
+        """Refresh Piper voice list based on selected lang/gender filters."""
+        if not self.piper_manager:
+            return
+        lang_map = {"Español": "es", "Inglés": "en", "Todos": None}
+        gender_map = {"Masculino": "male", "Femenino": "female", "Todos": None}
+        lang = lang_map.get(self.piper_lang_var.get())
+        gender = gender_map.get(self.piper_gender_var.get())
+        self.piper_manager.update_filters(language=lang, gender=gender)
+        names = self.piper_manager.get_voice_names()
+        self.piper_voice_dropdown.configure(values=names)
+        if names:
+            self.piper_voice_var.set(names[0])
+            self._on_piper_voice_selected(names[0])
+
+    def _on_piper_voice_selected(self, name: str = ""):
+        """Update download button state based on whether model is local."""
+        if not self.piper_manager or not name:
+            return
+        if self.piper_manager.is_downloaded(name):
+            self.piper_dl_btn.configure(text="✔ Descargado", fg_color="#2E7D32", state=tk.DISABLED)
+            self.piper_status_lbl.configure(text="Modelo disponible offline")
+        else:
+            self.piper_dl_btn.configure(text="Descargar modelo", fg_color="#E65100", state=tk.NORMAL)
+            self.piper_status_lbl.configure(text="Modelo no descargado — requiere internet una vez")
+
+    def _download_piper_model(self):
+        """Download selected Piper model in background thread."""
+        voice_name = self.piper_voice_var.get()
+        if not voice_name or not self.piper_manager:
+            return
+
+        self.piper_dl_btn.configure(state=tk.DISABLED, text="Descargando...")
+        self.piper_dl_bar.set(0)
+        self.piper_dl_bar.grid()
+
+        def _progress(downloaded, total, filename):
+            if total > 0:
+                self.after(0, lambda d=downloaded, t=total, f=filename: (
+                    self.piper_dl_bar.set(d / t),
+                    self.piper_status_lbl.configure(
+                        text=f"Descargando {f}... {d // 1024}KB / {t // 1024}KB"
+                    )
+                ))
+
+        def _run():
+            try:
+                self.piper_manager.download_voice(voice_name, progress_callback=_progress)
+                self.after(0, lambda: (
+                    self.piper_dl_bar.set(1),
+                    self.piper_dl_bar.grid_remove(),
+                    self._on_piper_voice_selected(voice_name),
+                    self.piper_status_lbl.configure(text="Descarga completada. Listo para usar offline.")
+                ))
+            except Exception as e:
+                self.after(0, lambda err=str(e): (
+                    self.piper_dl_bar.grid_remove(),
+                    self.piper_dl_btn.configure(state=tk.NORMAL, text="Reintentar", fg_color="#E65100"),
+                    self.piper_status_lbl.configure(text=f"Error: {err}")
+                ))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+
     
     def open_github(self):
         import webbrowser
@@ -486,16 +624,30 @@ class TextToSpeechApp(ctk.CTk):
         if not self.input_file:
             messagebox.showerror("Error", "Por favor seleccione un archivo")
             return
-            
-        if not self.voice_var.get():
-            messagebox.showerror("Error", "Por favor seleccione una voz")
-            return
-            
+
+        # Pick correct voice depending on mode
+        if self.engine_mode.get() == "offline":
+            selected_voice = self.piper_voice_var.get()
+            if not selected_voice:
+                messagebox.showerror("Error", "Por favor seleccione una voz Piper")
+                return
+            if self.piper_manager and not self.piper_manager.is_downloaded(selected_voice):
+                messagebox.showerror(
+                    "Modelo no descargado",
+                    f"Descarga primero el modelo:\n{selected_voice}"
+                )
+                return
+        else:
+            selected_voice = self.voice_var.get()
+            if not selected_voice:
+                messagebox.showerror("Error", "Por favor seleccione una voz")
+                return
+
         self.is_processing = True
         self.update_ui_state()
         self.progress_bar.set(0)
         self.status_var.set("Extrayendo texto...")
-        
+
         # Start conversion in a background thread
         self.conversion_thread = threading.Thread(
             target=self.run_conversion,
@@ -527,19 +679,23 @@ class TextToSpeechApp(ctk.CTk):
         try:
             if not self.input_file or not self.output_file:
                 return
-                
-            # Get the selected voice
-            voice_name = self.voice_var.get()
+
+            # Get the selected voice (depends on engine mode)
+            if self.engine_mode.get() == "offline":
+                voice_name = self.piper_voice_var.get()
+            else:
+                voice_name = self.voice_var.get()
+
             if not voice_name:
                 messagebox.showerror("Error", "Por favor seleccione una voz")
                 return
-                
+
             # Update UI for conversion start
             self.is_processing = True
             self.update_ui_state()
             self.status_var.set("Procesando...")
             self.progress_bar.set(0)
-            
+
             # Create a thread for the conversion
             self.conversion_thread = threading.Thread(
                 target=self._run_conversion_thread,

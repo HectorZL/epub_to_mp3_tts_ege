@@ -1,0 +1,39 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+.env/
+Pipfile
+Pipfile.lock
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Directorios de compilación e instalables (PyInstaller)
+build/
+dist/
+*.egg-info/
+*.spec
+*.exe
+
+# Modelos descargados
+piper_models/
+
+# Certificados generados localmente
+*Cert.pfx
+*.pfx
+
+# Archivos de audio generados (para no subir las pruebas)
+*.mp3
+*.wav
+
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+
+# OS generated files
+.DS_Store
+Thumbs.db
