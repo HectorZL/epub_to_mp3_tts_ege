@@ -200,10 +200,34 @@ class PiperVoiceManager:
 
             voice = PiperVoice(**kwargs)
 
+            from piper.config import SynthesisConfig
+            
+            # Inyección acústica: ralentización del tempo y micro-silencios
+            # Para Python wrapper, usamos SynthesisConfig
+            syn_config = SynthesisConfig(length_scale=1.15)
+            
             import wave
             with wave.open(output_wav, "wb") as wav_file:
-                voice.synthesize_wav(text, wav_file)
-
+                voice.synthesize_wav(
+                    text, 
+                    wav_file, 
+                    syn_config=syn_config
+                )
+                # --- INYECCIÓN DE RESPIRACIÓN (Digital Silence) ---
+                # Leemos los parámetros configurados por Piper
+                try:
+                    channels = wav_file.getnchannels()
+                    sampwidth = wav_file.getsampwidth()
+                    framerate = wav_file.getframerate()
+                    # Si Piper inicializó correctamente el stream, calculamos e inyectamos 0.5s de silencio
+                    if channels > 0 and sampwidth > 0 and framerate > 0:
+                        pausa_segundos = 0.5
+                        num_frames = int(framerate * pausa_segundos)
+                        silence_bytes = b'\x00' * (num_frames * channels * sampwidth)
+                        wav_file.writeframes(silence_bytes)
+                except Exception as silence_e:
+                    print(f"Nota: No se pudo inyectar pausa al final del WAV: {silence_e}")
+                    
         except Exception as e:
             raise Exception(f"Error en síntesis Piper: {e}")
 

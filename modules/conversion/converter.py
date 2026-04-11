@@ -22,6 +22,8 @@ class AudioConverter:
         text: str,
         voice_name: str,
         output_file: str,
+        rate: str = "-10%",
+        volume: str = "+0%",
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> bool:
         """Convert text to speech and save as MP3"""
@@ -87,6 +89,22 @@ class AudioConverter:
                 temp_files.append(temp_file)
                 
                 try:
+                    # --- PROSODIA HEURÍSTICA Y SENTIMIENTOS ---
+                    current_rate = rate  # from method definition fallback (-10%)
+                    current_pitch = "+0Hz"
+                    current_volume = volume # from method definition
+                    
+                    if "!" in chunk or "¡" in chunk:
+                        current_pitch = "+10Hz"
+                        current_rate = "+0%"  # Accelerates due to exclamation
+                    elif "?" in chunk or "¿" in chunk:
+                        current_pitch = "+5Hz"
+                    elif '"' in chunk or "—" in chunk or "«" in chunk or "-" in chunk:
+                        current_pitch = "+2Hz"
+                        current_volume = "+5%"
+                    else:
+                        pass # Normal reading
+                        
                     if self.engine_mode == "offline" and self.piper_manager:
                         # ── Piper offline ─────────────────────────────────
                         tmp_wav = temp_file.replace(".mp3", ".wav")
@@ -98,11 +116,14 @@ class AudioConverter:
                             pass
                     else:
                         # ── edge-tts online ───────────────────────────────
+                        # Truco SSML para pausas invisibles
+                        chunk_text = chunk + "...\n\n"
                         communicate = edge_tts.Communicate(
-                            text=chunk,
+                            text=chunk_text,
                             voice=voice['Name'],
-                            rate="+0%",
-                            volume="+0%"
+                            rate=current_rate,
+                            volume=current_volume,
+                            pitch=current_pitch
                         )
                         try:
                             await asyncio.wait_for(communicate.save(temp_file), timeout=300)
@@ -153,7 +174,7 @@ class AudioConverter:
         input_path: str,
         output_path: str,
         voice_name: str,
-        rate: str = "+0%",
+        rate: str = "-10%",
         volume: str = "+0%",
         selected_chapters: Optional[List[int]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -275,8 +296,10 @@ class AudioConverter:
                 
             # If paragraph is too long, split into sentences
             if len(para) > max_chars:
-                # Simple sentence splitting - could be improved with NLTK for better accuracy
-                sentences = para.split('. ')
+                # Splitting by sentence boundary (. ! ?) while ignoring common abbreviations to prevent context breakage
+                # Negative lookbehinds for Dr, Sr, Sra, Mr, Ms, Prof, etc.
+                split_regex = r'(?<!\bDr)(?<!\bSr)(?<!\bSra)(?<!\bMr)(?<!\bMs)(?<!\bProf)(?<!\bSt)(?<=[.!?])\s+'
+                sentences = re.split(split_regex, para)
                 current_sentence = ""
                 
                 for sent in sentences:
@@ -284,11 +307,10 @@ class AudioConverter:
                     if not sent:
                         continue
                         
-                    # Add period if it was removed by split
-                    if not sent.endswith('.'):
-                        sent += '.'
-                        
-                    if len(current_sentence) + len(sent) <= max_chars:
+                    # We don't forcefully append a period if we are splitting with regex correctly,
+                    # but if it somehow lacks terminal punctuation and isn't the last valid sentence,
+                    # the text cleaner already handled punctuation. We just rebuild the chunks.
+                    if len(current_sentence) + len(sent) + 1 <= max_chars:
                         current_sentence += " " + sent if current_sentence else sent
                     else:
                         if current_sentence:

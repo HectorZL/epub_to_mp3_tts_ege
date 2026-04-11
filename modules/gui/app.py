@@ -269,18 +269,10 @@ class TextToSpeechApp(ctk.CTk):
         )
         self.piper_lang_dropdown.grid(row=1, column=1, padx=5, pady=4, sticky="w")
 
-        ctk.CTkLabel(self.offline_panel, text="Género:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
-        self.piper_gender_var = tk.StringVar(value="Femenino")
-        self.piper_gender_dropdown = ctk.CTkComboBox(
-            self.offline_panel,
-            variable=self.piper_gender_var,
-            values=["Masculino", "Femenino", "Todos"],
-            state="readonly",
-            command=self._update_piper_voices
-        )
-        self.piper_gender_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
-
-        ctk.CTkLabel(self.offline_panel, text="Voz Piper:").grid(row=3, column=0, padx=5, pady=4, sticky="w")
+        # Gender filter removed for Piper as both voices are female by default
+        self.piper_gender_var = tk.StringVar(value="Todos")
+        
+        ctk.CTkLabel(self.offline_panel, text="Voz Piper:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
         self.piper_voice_var = tk.StringVar()
         self.piper_voice_dropdown = ctk.CTkComboBox(
             self.offline_panel,
@@ -288,7 +280,7 @@ class TextToSpeechApp(ctk.CTk):
             values=[], state="readonly", width=350,
             command=self._on_piper_voice_selected
         )
-        self.piper_voice_dropdown.grid(row=3, column=1, padx=5, pady=4, sticky="w")
+        self.piper_voice_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
 
         self.piper_dl_btn = ctk.CTkButton(
             self.offline_panel,
@@ -298,7 +290,7 @@ class TextToSpeechApp(ctk.CTk):
             hover_color="#F4511E",
             command=self._download_piper_model
         )
-        self.piper_dl_btn.grid(row=3, column=2, padx=5, pady=4)
+        self.piper_dl_btn.grid(row=2, column=2, padx=5, pady=4)
 
         self.piper_status_lbl = ctk.CTkLabel(
             self.offline_panel,
@@ -306,10 +298,10 @@ class TextToSpeechApp(ctk.CTk):
             font=("Arial", 10),
             text_color=("#888", "#aaa")
         )
-        self.piper_status_lbl.grid(row=4, column=0, columnspan=3, padx=5, pady=2, sticky="w")
+        self.piper_status_lbl.grid(row=3, column=0, columnspan=3, padx=5, pady=2, sticky="w")
 
         self.piper_dl_bar = ctk.CTkProgressBar(self.offline_panel, mode="determinate")
-        self.piper_dl_bar.grid(row=5, column=0, columnspan=3, padx=5, pady=(2, 6), sticky="ew")
+        self.piper_dl_bar.grid(row=4, column=0, columnspan=3, padx=5, pady=(2, 6), sticky="ew")
         self.piper_dl_bar.set(0)
         self.piper_dl_bar.grid_remove()   # hidden until download starts
 
