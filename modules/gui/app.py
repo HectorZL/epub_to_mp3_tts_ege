@@ -74,8 +74,17 @@ class TextToSpeechApp(ctk.CTk):
         # Configure window background
         self.configure(fg_color="#0F172A")
         
+        # Outer container to center the app and prevent infinite stretching on maximize
+        self.outer_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.outer_container.grid(row=0, column=0, sticky="ns")
+        self.outer_container.grid_columnconfigure(0, weight=1)
+        
+        # Configure grid for main window to expand around outer_container
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        
         # Main container
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_frame = ctk.CTkFrame(self.outer_container, fg_color="transparent")
         self.main_frame.grid(row=0, column=0, padx=20, pady=15, sticky="nsew")
         self.main_frame.grid_columnconfigure(0, weight=1)
 
@@ -567,9 +576,10 @@ class TextToSpeechApp(ctk.CTk):
         self.status_bar.grid(row=8, column=0, padx=5, pady=(5, 0), sticky="ew")
 
         # ── Footer ─────────────────────────────────────────────────────────────
-        self.footer_frame = ctk.CTkFrame(self, height=25, fg_color="transparent")
-        self.footer_frame.grid(row=2, column=0, sticky="sew", padx=20, pady=(0, 10))
-        self.grid_rowconfigure(2, weight=0)
+        self.footer_frame = ctk.CTkFrame(self.outer_container, height=25, fg_color="transparent")
+        self.footer_frame.grid(row=1, column=0, sticky="sew", padx=20, pady=(0, 10))
+        self.outer_container.grid_rowconfigure(0, weight=1)
+        self.outer_container.grid_rowconfigure(1, weight=0)
 
         self.dev_credit = ctk.CTkLabel(
             self.footer_frame, text="Desarrollado con ❤ para EGE",
@@ -585,7 +595,7 @@ class TextToSpeechApp(ctk.CTk):
         self.github_link.pack(side=tk.RIGHT)
         self.github_link.bind("<Button-1>", lambda e: self.open_github())
         self.footer_frame.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(1, weight=0)
 
         # Set initial styles for the active engine button
         self._update_engine_button_styles()
