@@ -573,7 +573,7 @@ class TextToSpeechApp(ctk.CTk):
 
         self.dev_credit = ctk.CTkLabel(
             self.footer_frame, text="Desarrollado con ❤ para EGE",
-            text_color="#475569", font=ctk.CTkFont(family="Segoe UI", size=10, italic=True)
+            text_color="#475569", font=ctk.CTkFont(family="Segoe UI", size=10, slant="italic")
         )
         self.dev_credit.pack(side=tk.LEFT)
 
