@@ -90,7 +90,7 @@ class TextToSpeechApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
             text_color="#F8FAFC"
         )
-        title_label.grid(row=0, column=0, sticky="center")
+        title_label.grid(row=0, column=0)
         
         subtitle_label = ctk.CTkLabel(
             title_frame,
@@ -98,7 +98,7 @@ class TextToSpeechApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color="#64748B"
         )
-        subtitle_label.grid(row=1, column=0, pady=(2, 0), sticky="center")
+        subtitle_label.grid(row=1, column=0, pady=(2, 0))
 
         # ── Card 1: Motor TTS (row 2) ──────────────────────────────────────────
         engine_card = ctk.CTkFrame(
