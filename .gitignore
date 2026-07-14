@@ -20,6 +20,7 @@ dist/
 
 # Modelos descargados
 piper_models/
+kokoro_models/
 
 # Certificados generados localmente
 *Cert.pfx
@@ -37,3 +38,9 @@ piper_models/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+#epub
+*.epub
+
+#mp3
+*.mp3

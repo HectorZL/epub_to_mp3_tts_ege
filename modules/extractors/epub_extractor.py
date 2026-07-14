@@ -175,10 +175,6 @@ class EPUBExtractor(BaseExtractor):
             if isinstance(content, bytes):
                 content = content.decode('utf-8', errors='replace')
             
-            # Initial cleanup of problematic patterns that could lead to repeated characters
-            content = re.sub(r'\s*[=_-]+\s*', ' ', content)  # Clean up separators with spaces
-            content = re.sub(r'\s{2,}', ' ', content)  # Normalize spaces
-            
             # Parse with BeautifulSoup
             soup = BeautifulSoup(content, 'html.parser')
             
@@ -186,36 +182,65 @@ class EPUBExtractor(BaseExtractor):
             for element in soup(['script', 'style', 'noscript', 'svg', 'iframe', 'button', 'input', 'select', 'textarea']):
                 element.decompose()
             
-            # Process text content
-            text = soup.get_text(' ', strip=True)
+            paragraphs = []
             
-            # Clean up the extracted text
-            lines = []
-            for line in text.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
+            def walk(element):
+                if not element:
+                    return
+                # If it's a script/style/etc., ignore it
+                if element.name in ['script', 'style', 'noscript', 'svg', 'iframe', 'button', 'input', 'select', 'textarea']:
+                    return
                     
-                # Skip lines that are just separators or special characters
-                if re.fullmatch(r'^[=_-]{2,}$', line) or re.fullmatch(r'^[\W_]+$', line):
-                    continue
-                    
-                # Skip lines with too many repeated characters
-                if re.search(r'(.)\1{3,}', line):
-                    continue
-                    
-                # Clean up the line
-                line = re.sub(r'\s*[=_-]+\s*', ' ', line)  # Remove separators
-                line = re.sub(r'\s{2,}', ' ', line)  # Normalize spaces
+                block_tags = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'dt', 'dd', 'tr', 'section', 'article', 'aside', 'header', 'footer', 'title'}
                 
-                lines.append(line)
+                if element.name in block_tags:
+                    # Check if it contains nested block tags
+                    has_nested_blocks = any(child.name in block_tags for child in element.find_all() if child.name)
+                    if not has_nested_blocks:
+                        text = element.get_text(' ', strip=True)
+                        if text:
+                            text = re.sub(r'\s+', ' ', text).strip()
+                            if text:
+                                paragraphs.append(text)
+                        return
+                
+                # Recurse children
+                for child in element.children:
+                    if child.name:
+                        walk(child)
+                    elif isinstance(child, str):
+                        text = child.strip()
+                        if text:
+                            text = re.sub(r'\s+', ' ', text).strip()
+                            if text:
+                                paragraphs.append(text)
             
-            # Combine lines and clean up
-            cleaned_text = ' '.join(lines)
-            cleaned_text = re.sub(r'\s*([.,;:!?])\s*', r'\1 ', cleaned_text)  # Fix punctuation spacing
-            cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()  # Final cleanup
+            body = soup.find('body')
+            walk(body if body else soup)
             
-            return cleaned_text
+            formatted_paragraphs = []
+            for p in paragraphs:
+                # Clean up separators, repeated characters, etc.
+                if re.fullmatch(r'^[=_-]{2,}$', p) or re.fullmatch(r'^[\W_]+$', p):
+                    continue
+                if re.search(r'(.)\1{4,}', p):
+                    continue
+                
+                # Strip and clean punctuation spacing
+                p = re.sub(r'\s*([.,;:!?])\s*', r'\1 ', p)
+                p = re.sub(r'\s+', ' ', p).strip()
+                
+                if not p:
+                    continue
+                    
+                # Inyectar puntuación final si falta para forzar pausas del modelo de voz
+                if not re.search(r'[.!?…:;—"”\']$', p):
+                    p += "."
+                    
+                formatted_paragraphs.append(p)
+                
+            # Combinar párrafos con doble salto de línea para segmentación del conversor
+            return '\n\n'.join(formatted_paragraphs)
             
         except Exception as e:
             print(f"Error extracting text from HTML: {e}")

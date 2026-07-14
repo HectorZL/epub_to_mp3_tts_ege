@@ -6,12 +6,15 @@ from typing import Optional, Callable, List, Dict, Any
 import edge_tts
 
 from modules.utils.voice_manager import VoiceManager
+from modules.extractors import get_extractor
 
 class AudioConverter:
-    def __init__(self, voice_manager: VoiceManager, piper_manager=None):
+    def __init__(self, voice_manager: VoiceManager, piper_manager=None, chatterbox_manager=None, kokoro_manager=None):
         self.voice_manager = voice_manager
         self.piper_manager = piper_manager
-        self.engine_mode = "online"   # 'online' | 'offline'
+        self.chatterbox_manager = chatterbox_manager
+        self.kokoro_manager = kokoro_manager
+        self.engine_mode = "online"   # 'online' | 'offline' | 'chatterbox' | 'kokoro'
         self.is_processing = False
         self.is_paused = False
         self.is_cancelled = False
@@ -40,8 +43,8 @@ class AudioConverter:
         
         try:
             # Get the full voice details (only needed for edge-tts)
-            if self.engine_mode == "offline":
-                voice = {"Name": voice_name}  # Piper usa el nombre directamente
+            if self.engine_mode in ["offline", "chatterbox", "kokoro"]:
+                voice = {"Name": voice_name}
             else:
                 voice = self.voice_manager.get_voice_by_name(voice_name)
                 if not voice:
@@ -58,8 +61,17 @@ class AudioConverter:
             if not text:
                 raise ValueError("El texto está vacío después de limpiar")
                 
-            # Split text into smaller chunks to handle large texts
-            chunks = self._split_into_chunks(text)
+            # Split text into smaller chunks to handle large texts safely depending on the engine
+            if self.engine_mode == "chatterbox":
+                max_chars = 200  # Chatterbox fails/stops early with long texts
+            elif self.engine_mode == "kokoro":
+                max_chars = 400  # Kokoro works well with medium chunks
+            elif self.engine_mode == "offline":
+                max_chars = 1000  # Piper works well with medium chunks
+            else:
+                max_chars = 5000  # edge-tts (online) can handle larger chunks
+                
+            chunks = self._split_into_chunks(text, max_chars=max_chars)
             total_chunks = len(chunks)
             
             if not chunks:
@@ -110,6 +122,39 @@ class AudioConverter:
                         tmp_wav = temp_file.replace(".mp3", ".wav")
                         self.piper_manager.synthesize(chunk, voice_name, tmp_wav)
                         self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                        try:
+                            os.remove(tmp_wav)
+                        except Exception:
+                            pass
+                    elif self.engine_mode == "chatterbox" and self.chatterbox_manager:
+                        # ── Chatterbox offline ────────────────────────────
+                        tmp_wav = temp_file.replace(".mp3", ".wav")
+                        audio_prompt = None if voice_name == "default" else voice_name
+                        self.chatterbox_manager.synthesize(chunk, tmp_wav, audio_prompt_path=audio_prompt)
+                        # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
+                        if self.piper_manager:
+                            self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                        else:
+                            # Fallback si piper_manager no está disponible
+                            import soundfile as sf
+                            data, samplerate = sf.read(tmp_wav)
+                            sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
+                        try:
+                            os.remove(tmp_wav)
+                        except Exception:
+                            pass
+                    elif self.engine_mode == "kokoro" and self.kokoro_manager:
+                        # ── Kokoro offline ────────────────────────────────
+                        tmp_wav = temp_file.replace(".mp3", ".wav")
+                        self.kokoro_manager.synthesize(chunk, voice_name, tmp_wav)
+                        # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
+                        if self.piper_manager:
+                            self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                        else:
+                            # Fallback si piper_manager no está disponible
+                            import soundfile as sf
+                            data, samplerate = sf.read(tmp_wav)
+                            sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
                         try:
                             os.remove(tmp_wav)
                         except Exception:
@@ -190,13 +235,13 @@ class AudioConverter:
             # Handle both string and chapter-based extraction
             if isinstance(result, str):
                 # Single text content
-                await self._convert_text(
-                    result, 
-                    output_path, 
-                    voice_name, 
-                    rate, 
-                    volume,
-                    progress_callback
+                await self.convert_text_to_speech(
+                    text=result, 
+                    voice_name=voice_name,
+                    output_file=output_path, 
+                    rate=rate, 
+                    volume=volume,
+                    progress_callback=progress_callback
                 )
             elif isinstance(result, list):
                 # Chapter-based content
@@ -215,6 +260,13 @@ class AudioConverter:
                 # Convert each chapter
                 total_chapters = len(result)
                 for i, (original_idx, chapter) in enumerate(result):
+                    chapter_content = chapter.get('content', '')
+                    if not chapter_content or not chapter_content.strip():
+                        print(f"Saltando capítulo vacío {original_idx + 1} ({chapter.get('title', 'Sin título')})")
+                        if progress_callback:
+                            progress_callback(original_idx + 1, total_chapters)
+                        continue
+
                     if progress_callback:
                         # Update progress with original chapter number for better user feedback
                         progress_callback(original_idx + 1, total_chapters)
@@ -227,13 +279,13 @@ class AudioConverter:
                     # Include the original chapter number in the filename
                     chapter_output = f"{base}_Cap{original_idx + 1:02d}_{chapter_name}{ext}"
                     
-                    await self._convert_text(
-                        chapter['content'],
-                        chapter_output,
-                        voice_name,
-                        rate,
-                        volume,
-                        None  # No progress for individual chapters
+                    await self.convert_text_to_speech(
+                        text=chapter_content,
+                        voice_name=voice_name,
+                        output_file=chapter_output,
+                        rate=rate,
+                        volume=volume,
+                        progress_callback=None  # No progress for individual chapters
                     )
                 
                 if progress_callback:
@@ -280,7 +332,7 @@ class AudioConverter:
     
     def _split_into_chunks(self, text: str, max_chars: int = 5000) -> List[str]:
         """Split text into chunks of maximum size, trying to break at sentence boundaries"""
-        if len(text) <= max_chars:
+        if len(text) <= max_chars and self.engine_mode not in ["offline", "chatterbox", "kokoro"]:
             return [text]
             
         chunks = []
@@ -288,6 +340,8 @@ class AudioConverter:
         
         # Split into paragraphs first
         paragraphs = text.split('\n\n')
+        
+        prevent_merge = self.engine_mode in ["offline", "chatterbox", "kokoro"]
         
         for para in paragraphs:
             para = para.strip()
@@ -307,9 +361,6 @@ class AudioConverter:
                     if not sent:
                         continue
                         
-                    # We don't forcefully append a period if we are splitting with regex correctly,
-                    # but if it somehow lacks terminal punctuation and isn't the last valid sentence,
-                    # the text cleaner already handled punctuation. We just rebuild the chunks.
                     if len(current_sentence) + len(sent) + 1 <= max_chars:
                         current_sentence += " " + sent if current_sentence else sent
                     else:
@@ -320,18 +371,22 @@ class AudioConverter:
                 if current_sentence:
                     chunks.append(current_sentence)
             else:
-                # If current chunk + paragraph is too big, start a new chunk
-                if current_chunk and len(current_chunk) + len(para) + 2 > max_chars:
-                    chunks.append(current_chunk)
-                    current_chunk = para
+                if prevent_merge:
+                    # Do not merge separate paragraphs for offline/chatterbox to preserve paragraph-level pause
+                    chunks.append(para)
                 else:
-                    if current_chunk:
-                        current_chunk += "\n\n" + para
-                    else:
+                    # If current chunk + paragraph is too big, start a new chunk
+                    if current_chunk and len(current_chunk) + len(para) + 2 > max_chars:
+                        chunks.append(current_chunk)
                         current_chunk = para
+                    else:
+                        if current_chunk:
+                            current_chunk += "\n\n" + para
+                        else:
+                            current_chunk = para
         
-        # Add the last chunk if not empty
-        if current_chunk:
+        # Add the last chunk if not empty and we were merging
+        if not prevent_merge and current_chunk:
             chunks.append(current_chunk)
             
         return chunks

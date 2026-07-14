@@ -12,104 +12,17 @@ from modules.utils.voice_manager import VoiceManager
 from modules.conversion.converter import AudioConverter
 from modules.extractors import get_extractor
 
-class ChapterSelectionDialog(ctk.CTkToplevel):
-    def __init__(self, parent, chapters: List[str], title: str = "Seleccionar Capítulos", *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
-        self.title(title)
-        self.geometry("500x400")
-        self.resizable(True, True)
-        self.chapters = chapters
-        self.selected_chapters: Set[int] = set(range(len(chapters)))  # All selected by default
-        
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        
-        # Title
-        title_label = ctk.CTkLabel(
-            self, 
-            text="Seleccione los capítulos a convertir:",
-            font=("Arial", 14, "bold")
-        )
-        title_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        
-        # Scrollable frame for chapters
-        self.chapters_frame = ctk.CTkScrollableFrame(self)
-        self.chapters_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
-        
-        # Chapter checkboxes
-        self.checkbox_vars = []
-        for i, chapter in enumerate(chapters):
-            var = tk.BooleanVar(value=True)
-            self.checkbox_vars.append(var)
-            # Handle both string and dictionary chapter formats
-            chapter_title = chapter.get('title', chapter) if isinstance(chapter, dict) else chapter
-            cb = ctk.CTkCheckBox(
-                self.chapters_frame,
-                text=f"Capítulo {i+1}: {str(chapter_title)[:50]}{'...' if len(str(chapter_title)) > 50 else ''}",
-                variable=var,
-                command=lambda idx=i: self.toggle_chapter(idx)
-            )
-            cb.pack(anchor="w", pady=2)
-        
-        # Buttons frame
-        buttons_frame = ctk.CTkFrame(self, fg_color="transparent")
-        buttons_frame.grid(row=2, column=0, pady=10)
-        
-        select_all_btn = ctk.CTkButton(
-            buttons_frame,
-            text="Seleccionar Todo",
-            command=self.select_all
-        )
-        select_all_btn.pack(side=tk.LEFT, padx=5)
-        
-        deselect_all_btn = ctk.CTkButton(
-            buttons_frame,
-            text="Deseleccionar Todo",
-            command=self.deselect_all
-        )
-        deselect_all_btn.pack(side=tk.LEFT, padx=5)
-        
-        ok_btn = ctk.CTkButton(
-            buttons_frame,
-            text="Aceptar",
-            command=self.on_ok
-        )
-        ok_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.result = None
-        self.protocol("WM_DELETE_WINDOW", self.on_cancel)
-    
-    def toggle_chapter(self, idx: int):
-        if idx in self.selected_chapters:
-            self.selected_chapters.remove(idx)
-        else:
-            self.selected_chapters.add(idx)
-    
-    def select_all(self):
-        self.selected_chapters = set(range(len(self.chapters)))
-        for var in self.checkbox_vars:
-            var.set(True)
-    
-    def deselect_all(self):
-        self.selected_chapters.clear()
-        for var in self.checkbox_vars:
-            var.set(False)
-    
-    def on_ok(self):
-        self.result = sorted(list(self.selected_chapters))
-        self.destroy()
-    
-    def on_cancel(self):
-        self.result = None
-        self.destroy()
+
 
 class TextToSpeechApp(ctk.CTk):
-    def __init__(self, voice_manager: VoiceManager, audio_converter: AudioConverter, piper_manager=None):
+    def __init__(self, voice_manager: VoiceManager, audio_converter: AudioConverter, piper_manager=None, chatterbox_manager=None, kokoro_manager=None):
         super().__init__()
         
         self.voice_manager = voice_manager
         self.audio_converter = audio_converter
         self.piper_manager = piper_manager
+        self.chatterbox_manager = chatterbox_manager
+        self.kokoro_manager = kokoro_manager
         
         self.title("Conversor de Libros a Audio")
         self.geometry("900x780")
@@ -184,18 +97,32 @@ class TextToSpeechApp(ctk.CTk):
         toggle_inner.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
         self.btn_online = ctk.CTkButton(
-            toggle_inner, text="Online (edge-tts)", width=160,
+            toggle_inner, text="Online (edge-tts)", width=140,
             command=lambda: self._set_engine("online"),
             fg_color="#1565C0", hover_color="#1976D2"
         )
         self.btn_online.pack(side=tk.LEFT, padx=(0, 6))
 
         self.btn_offline = ctk.CTkButton(
-            toggle_inner, text="Offline (Piper)", width=160,
+            toggle_inner, text="Offline (Piper)", width=140,
             command=lambda: self._set_engine("offline"),
             fg_color="#424242", hover_color="#616161"
         )
         self.btn_offline.pack(side=tk.LEFT)
+
+        self.btn_chatterbox = ctk.CTkButton(
+            toggle_inner, text="Offline (Chatterbox)", width=140,
+            command=lambda: self._set_engine("chatterbox"),
+            fg_color="#424242", hover_color="#616161"
+        )
+        self.btn_chatterbox.pack(side=tk.LEFT, padx=(6, 0))
+
+        self.btn_kokoro = ctk.CTkButton(
+            toggle_inner, text="Offline (Kokoro)", width=140,
+            command=lambda: self._set_engine("kokoro"),
+            fg_color="#424242", hover_color="#616161"
+        )
+        self.btn_kokoro.pack(side=tk.LEFT, padx=(6, 0))
 
         self.engine_badge = ctk.CTkLabel(
             engine_frame, text="● Online", text_color="#4CAF50",
@@ -310,18 +237,160 @@ class TextToSpeechApp(ctk.CTk):
         # Initialize Piper voice list
         self._update_piper_voices()
 
-        # ── Chapter selection button ───────────────────────────────────────────
-        self.chapter_btn = ctk.CTkButton(
+        # ── Chatterbox panel (Chatterbox) ──────────────────────────────────────
+        self.chatterbox_panel = ctk.CTkFrame(self.main_frame)
+        # Oculto por defecto
+        
+        ctk.CTkLabel(
+            self.chatterbox_panel,
+            text="Chatterbox TTS — Offline (IA local)",
+            font=("Arial", 13, "bold")
+        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(8, 4), sticky="w")
+
+        # Estado de dependencias
+        self.cb_status_lbl = ctk.CTkLabel(
+            self.chatterbox_panel,
+            text="Verificando componentes...",
+            font=("Arial", 11)
+        )
+        self.cb_status_lbl.grid(row=1, column=0, columnspan=2, padx=5, pady=4, sticky="w")
+
+        self.cb_install_btn = ctk.CTkButton(
+            self.chatterbox_panel,
+            text="Instalar componentes de IA local",
+            width=220,
+            fg_color="#E65100",
+            hover_color="#F4511E",
+            command=self._install_chatterbox_dependencies
+        )
+        self.cb_install_btn.grid(row=1, column=2, padx=5, pady=4, sticky="e")
+
+        # Tipo de voz
+        ctk.CTkLabel(self.chatterbox_panel, text="Voz Chatterbox:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
+        self.cb_voice_mode_var = tk.StringVar(value="Voz Predeterminada")
+        self.cb_voice_dropdown = ctk.CTkComboBox(
+            self.chatterbox_panel,
+            variable=self.cb_voice_mode_var,
+            values=["Voz Predeterminada", "Clonada (Personalizada...)"],
+            state="readonly",
+            width=200,
+            command=self._on_cb_voice_mode_changed
+        )
+        self.cb_voice_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
+
+        # Frame de voz clonada
+        self.cb_clone_frame = ctk.CTkFrame(self.chatterbox_panel, fg_color="transparent")
+        self.cb_clone_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(self.cb_clone_frame, text="Audio de Referencia (~10s):").grid(row=0, column=0, padx=5, pady=4, sticky="w")
+        self.cb_ref_audio_entry = ctk.CTkEntry(self.cb_clone_frame, width=280)
+        self.cb_ref_audio_entry.grid(row=0, column=1, padx=5, pady=4, sticky="ew")
+        
+        self.cb_ref_browse_btn = ctk.CTkButton(
+            self.cb_clone_frame,
+            text="Examinar...",
+            width=90,
+            command=self._browse_ref_audio
+        )
+        self.cb_ref_browse_btn.grid(row=0, column=2, padx=5, pady=4)
+
+        self.chatterbox_panel.grid_columnconfigure(1, weight=1)
+
+        # ── Kokoro panel (Kokoro) ──────────────────────────────────────────────
+        self.kokoro_panel = ctk.CTkFrame(self.main_frame)
+        # Oculto por defecto
+        
+        ctk.CTkLabel(
+            self.kokoro_panel,
+            text="Kokoro TTS — Offline (IA local)",
+            font=("Arial", 13, "bold")
+        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(8, 4), sticky="w")
+
+        # Estado del modelo y voces
+        self.kokoro_status_lbl = ctk.CTkLabel(
+            self.kokoro_panel,
+            text="Verificando componentes...",
+            font=("Arial", 11)
+        )
+        self.kokoro_status_lbl.grid(row=1, column=0, columnspan=2, padx=5, pady=4, sticky="w")
+
+        self.kokoro_dl_btn = ctk.CTkButton(
+            self.kokoro_panel,
+            text="Descargar modelo Kokoro (~180MB)",
+            width=260,
+            fg_color="#E65100",
+            hover_color="#F4511E",
+            command=self._download_kokoro_model
+        )
+        self.kokoro_dl_btn.grid(row=1, column=2, padx=5, pady=4, sticky="e")
+
+        # Tipo de voz
+        ctk.CTkLabel(self.kokoro_panel, text="Idioma:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
+        self.kokoro_lang_var = tk.StringVar(value="Español")
+        self.kokoro_lang_dropdown = ctk.CTkComboBox(
+            self.kokoro_panel,
+            variable=self.kokoro_lang_var,
+            values=["Español", "Inglés"],
+            state="readonly",
+            width=120,
+            command=self._update_kokoro_voices
+        )
+        self.kokoro_lang_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
+
+        ctk.CTkLabel(self.kokoro_panel, text="Voz Kokoro:").grid(row=3, column=0, padx=5, pady=4, sticky="w")
+        self.kokoro_voice_var = tk.StringVar()
+        self.kokoro_voice_dropdown = ctk.CTkComboBox(
+            self.kokoro_panel,
+            variable=self.kokoro_voice_var,
+            values=[],
+            state="readonly",
+            width=260
+        )
+        self.kokoro_voice_dropdown.grid(row=3, column=1, columnspan=2, padx=5, pady=4, sticky="ew")
+
+        # Barra de progreso de descarga
+        self.kokoro_dl_bar = ctk.CTkProgressBar(self.kokoro_panel, mode="determinate")
+        self.kokoro_dl_bar.grid(row=4, column=0, columnspan=3, padx=5, pady=(4, 8), sticky="ew")
+        self.kokoro_dl_bar.set(0)
+        self.kokoro_dl_bar.grid_remove() # Oculto por defecto
+
+        self.kokoro_panel.grid_columnconfigure(1, weight=1)
+        
+        # Initialize Kokoro voices list
+        self._update_kokoro_voices()
+
+        # ── Chapter selection collapsible panel ──────────────────────────────────
+        self.chapter_toggle_btn = ctk.CTkButton(
             self.main_frame,
-            text="Seleccionar Capítulos",
-            command=self.select_chapters,
+            text="Seleccionar Capítulos (No hay archivo cargado)",
+            command=self.toggle_chapter_panel,
             state=tk.DISABLED
         )
-        self.chapter_btn.grid(row=4, column=0, columnspan=3, pady=10)
+        self.chapter_toggle_btn.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
+
+        # Container for chapters checkboxes (hidden by default)
+        self.chapter_container = ctk.CTkFrame(self.main_frame)
+        
+        # Header with select all/deselect all
+        ctrl_frame = ctk.CTkFrame(self.chapter_container, fg_color="transparent")
+        ctrl_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ctk.CTkButton(
+            ctrl_frame, text="Seleccionar todo", width=120, height=24, font=("Arial", 11),
+            command=self._select_all_chapters
+        ).pack(side=tk.LEFT, padx=2)
+        
+        ctk.CTkButton(
+            ctrl_frame, text="Deseleccionar todo", width=120, height=24, font=("Arial", 11),
+            command=self._deselect_all_chapters
+        ).pack(side=tk.LEFT, padx=2)
+        
+        self.chapter_scroll_frame = ctk.CTkScrollableFrame(self.chapter_container, height=180)
+        self.chapter_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
 
         # ── Action buttons ─────────────────────────────────────────────────────
         self.buttons_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.buttons_frame.grid(row=5, column=0, columnspan=3, pady=20)
+        self.buttons_frame.grid(row=6, column=0, columnspan=3, pady=20)
 
         self.convert_btn = ctk.CTkButton(
             self.buttons_frame, text="Convertir a MP3",
@@ -338,7 +407,7 @@ class TextToSpeechApp(ctk.CTk):
 
         # ── Progress ───────────────────────────────────────────────────────────
         self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.progress_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
+        self.progress_frame.grid(row=7, column=0, columnspan=3, sticky="ew", pady=10)
 
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame, mode="determinate")
         self.progress_bar.pack(fill=tk.X, pady=5)
@@ -366,7 +435,7 @@ class TextToSpeechApp(ctk.CTk):
         self.status_bar = ctk.CTkLabel(
             self.main_frame, textvariable=self.status_var, anchor="w", height=20
         )
-        self.status_bar.grid(row=7, column=0, columnspan=3, sticky="ew", pady=10)
+        self.status_bar.grid(row=8, column=0, columnspan=3, sticky="ew", pady=10)
 
         # ── Footer ─────────────────────────────────────────────────────────────
         self.footer_frame = ctk.CTkFrame(self, height=20, fg_color="transparent")
@@ -392,22 +461,126 @@ class TextToSpeechApp(ctk.CTk):
     # ─── Engine toggle helpers ─────────────────────────────────────────────────
 
     def _set_engine(self, mode: str):
-        """Switch between 'online' and 'offline' engine."""
+        """Switch between 'online', 'offline' (Piper), 'chatterbox' and 'kokoro' engine."""
         self.engine_mode.set(mode)
         self.audio_converter.engine_mode = mode
 
+        # Ocultar todos
+        self.online_panel.grid_remove()
+        self.offline_panel.grid_remove()
+        self.chatterbox_panel.grid_remove()
+        if hasattr(self, 'kokoro_panel'):
+            self.kokoro_panel.grid_remove()
+
+        # Restaurar colores de botones
+        self.btn_online.configure(fg_color="#424242")
+        self.btn_offline.configure(fg_color="#424242")
+        self.btn_chatterbox.configure(fg_color="#424242")
+        if hasattr(self, 'btn_kokoro'):
+            self.btn_kokoro.configure(fg_color="#424242")
+
         if mode == "online":
             self.btn_online.configure(fg_color="#1565C0")
-            self.btn_offline.configure(fg_color="#424242")
             self.engine_badge.configure(text="● Online", text_color="#4CAF50")
-            self.offline_panel.grid_remove()
             self.online_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-        else:
+        elif mode == "offline":
             self.btn_offline.configure(fg_color="#E65100")
-            self.btn_online.configure(fg_color="#424242")
-            self.engine_badge.configure(text="● Offline", text_color="#FF9800")
-            self.online_panel.grid_remove()
+            self.engine_badge.configure(text="● Offline (Piper)", text_color="#FF9800")
             self.offline_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+        elif mode == "chatterbox":
+            self.btn_chatterbox.configure(fg_color="#7B1FA2")
+            self.engine_badge.configure(text="● Chatterbox IA", text_color="#E040FB")
+            self.chatterbox_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self._check_chatterbox_status()
+        elif mode == "kokoro":
+            self.btn_kokoro.configure(fg_color="#00695C")
+            self.engine_badge.configure(text="● Kokoro IA", text_color="#00897B")
+            self.kokoro_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self._check_kokoro_status()
+
+    # ─── Chatterbox panel helpers ──────────────────────────────────────────────
+
+    def _check_chatterbox_status(self):
+        """Verifica si Chatterbox está instalado y actualiza la UI."""
+        if not self.chatterbox_manager:
+            return
+            
+        if self.chatterbox_manager.is_available():
+            has_cuda = self.chatterbox_manager.check_cuda()
+            device_str = "GPU (CUDA)" if has_cuda else "CPU"
+            self.cb_status_lbl.configure(
+                text=f"Componentes listos. Dispositivo de IA: {device_str}",
+                text_color="#4CAF50"
+            )
+            self.cb_install_btn.grid_remove()
+            self.cb_voice_dropdown.configure(state="readonly")
+        else:
+            self.cb_status_lbl.configure(
+                text="Faltan dependencias de IA local (chatterbox-tts, torch, torchaudio)",
+                text_color="#F44336"
+            )
+            self.cb_install_btn.grid()
+            self.cb_voice_dropdown.configure(state=tk.DISABLED)
+            self.cb_clone_frame.grid_remove()
+
+    def _install_chatterbox_dependencies(self):
+        """Instala las dependencias en segundo plano para no congelar la UI."""
+        self.cb_install_btn.configure(state=tk.DISABLED, text="Instalando...")
+        
+        log_win = ctk.CTkToplevel(self)
+        log_win.title("Instalador de componentes de IA")
+        log_win.geometry("600x400")
+        log_win.grid_columnconfigure(0, weight=1)
+        log_win.grid_rowconfigure(1, weight=1)
+        
+        ctk.CTkLabel(log_win, text="Instalando PyTorch, torchaudio y chatterbox-tts...", font=("Arial", 12, "bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        
+        log_text = tk.Text(log_win, wrap=tk.WORD, bg="#2B2B2B", fg="#FFFFFF", insertbackground="white")
+        log_text.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        
+        scrollbar = ttk.Scrollbar(log_text, command=log_text.yview)
+        log_text.configure(yscrollcommand=scrollbar.set)
+        
+        def write_log(message):
+            def _write():
+                log_text.insert(tk.END, message + "\n")
+                log_text.see(tk.END)
+            self.after(0, _write)
+
+        def _run():
+            success = self.chatterbox_manager.install_dependencies(progress_callback=write_log)
+            if success:
+                self.after(0, lambda: (
+                    self._check_chatterbox_status(),
+                    messagebox.showinfo("Instalación Completada", "Todos los componentes se instalaron correctamente.")
+                ))
+            else:
+                self.after(0, lambda: (
+                    self.cb_install_btn.configure(state=tk.NORMAL, text="Reintentar instalación"),
+                    self._check_chatterbox_status(),
+                    messagebox.showerror("Error de instalación", "Ocurrió un error al instalar los componentes. Revisa la consola.")
+                ))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_cb_voice_mode_changed(self, choice):
+        """Muestra u oculta la sección de clonación según la elección."""
+        if choice == "Clonada (Personalizada...)":
+            self.cb_clone_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=4, sticky="ew")
+        else:
+            self.cb_clone_frame.grid_remove()
+
+    def _browse_ref_audio(self):
+        """Busca el archivo de audio de referencia para clonación."""
+        filetypes = [
+            ("Archivos de audio", "*.wav *.mp3"),
+            ("Archivos WAV", "*.wav"),
+            ("Archivos MP3", "*.mp3")
+        ]
+        filename = filedialog.askopenfilename(filetypes=filetypes)
+        if filename:
+            self.cb_ref_audio_entry.delete(0, tk.END)
+            self.cb_ref_audio_entry.insert(0, filename)
 
     # ─── Piper panel helpers ───────────────────────────────────────────────────
 
@@ -527,60 +700,153 @@ class TextToSpeechApp(ctk.CTk):
         elif not voices:
             self.voice_var.set("")
     
-    def select_chapters(self):
-        """Show chapter selection dialog"""
+    def load_file_chapters(self):
+        """Extract chapters and their character counts in a background thread"""
         if not self.input_file:
             return
             
-        # Get the appropriate extractor for the file type
-        extractor = get_extractor(self.input_file)
-        if not extractor:
-            messagebox.showerror("Error", "Tipo de archivo no soportado")
+        self.chapter_toggle_btn.configure(state=tk.DISABLED, text="Cargando capítulos...")
+        
+        # Clear existing checkboxes in the scroll frame
+        for child in self.chapter_scroll_frame.winfo_children():
+            child.destroy()
+            
+        def _bg_load():
+            try:
+                import asyncio
+                extractor = get_extractor(self.input_file)
+                if not extractor:
+                    self.after(0, lambda: self.chapter_toggle_btn.configure(text="Formato no soportado"))
+                    return
+                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                content = loop.run_until_complete(extractor.extract_text(self.input_file))
+                loop.close()
+                
+                # Format chapters list with character counts
+                chapters_data = []
+                if isinstance(content, list):
+                    for i, chap in enumerate(content):
+                        title = chap.get('title', f"Capítulo {i+1}") if isinstance(chap, dict) else str(chap)
+                        text = chap.get('content', '') if isinstance(chap, dict) else str(chap)
+                        chapters_data.append({
+                            'index': i,
+                            'title': title,
+                            'chars': len(text)
+                        })
+                else:
+                    # PDF or plain text
+                    loop2 = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop2)
+                    titles = loop2.run_until_complete(extractor.get_chapters(self.input_file))
+                    loop2.close()
+                    for i, title in enumerate(titles):
+                        loop3 = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop3)
+                        chap_text = loop3.run_until_complete(extractor.extract_chapter(self.input_file, i))
+                        loop3.close()
+                        chapters_data.append({
+                            'index': i,
+                            'title': title,
+                            'chars': len(chap_text) if chap_text else 0
+                        })
+                
+                self.after(0, lambda data=chapters_data: self._on_chapters_loaded(data))
+            except Exception as e:
+                print(f"Error loading chapters: {e}")
+                self.after(0, lambda: self.chapter_toggle_btn.configure(text="Error al cargar capítulos"))
+
+        threading.Thread(target=_bg_load, daemon=True).start()
+
+    def _on_chapters_loaded(self, chapters_data):
+        """Populate the chapter container inside the main window"""
+        self.chapters_data = chapters_data
+        
+        self.chapter_checkboxes = []
+        self.chapter_vars = []
+        
+        for ch in chapters_data:
+            var = tk.BooleanVar(value=True)
+            self.chapter_vars.append(var)
+            
+            # Format text: "Cap. X: Title (1,234 chars)"
+            title_truncated = ch['title'][:50] + "..." if len(ch['title']) > 50 else ch['title']
+            display_text = f"Cap. {ch['index']+1}: {title_truncated} ({ch['chars']:,} caract.)"
+            
+            cb = ctk.CTkCheckBox(
+                self.chapter_scroll_frame,
+                text=display_text,
+                variable=var,
+                command=self._on_chapter_selection_changed
+            )
+            cb.pack(anchor="w", pady=3, padx=5)
+            self.chapter_checkboxes.append(cb)
+            
+        # Enable toggle button and update text
+        self.selected_chapters = list(range(len(chapters_data)))
+        self.chapter_toggle_btn.configure(state=tk.NORMAL)
+        self._update_chapter_toggle_btn_text()
+
+    def _on_chapter_selection_changed(self):
+        """Called when a checkbox is toggled"""
+        selected = []
+        for i, var in enumerate(self.chapter_vars):
+            if var.get():
+                selected.append(i)
+                
+        if len(selected) == len(self.chapters_data):
+            self.selected_chapters = list(range(len(self.chapters_data)))  # All selected
+        elif len(selected) == 0:
+            self.selected_chapters = []  # None selected
+        else:
+            self.selected_chapters = selected
+            
+        self._update_chapter_toggle_btn_text()
+
+    def _update_chapter_toggle_btn_text(self):
+        if not hasattr(self, 'chapters_data') or not self.chapters_data:
+            self.chapter_toggle_btn.configure(text="Seleccionar Capítulos (No hay archivo)")
             return
             
-        try:
-            # Run the async operation in a new event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        total_chapters = len(self.chapters_data)
+        selected_count = len(self.selected_chapters) if self.selected_chapters is not None else 0
+        
+        # Calculate selected characters
+        if self.selected_chapters is not None:
+            sel_chars = sum(self.chapters_data[i]['chars'] for i in self.selected_chapters)
+        else:
+            sel_chars = sum(ch['chars'] for ch in self.chapters_data)
             
-            # Get chapters from the file
-            chapters = loop.run_until_complete(extractor.get_chapters(self.input_file))
-            
-            if not chapters:
-                messagebox.showinfo("Información", "No se encontraron capítulos en el archivo.")
-                return
-                
-            # Show chapter selection dialog
-            dialog = ChapterSelectionDialog(
-                parent=self,
-                chapters=chapters,
-                title="Seleccionar Capítulos"
-            )
-            
-            # Wait for the dialog to close
-            self.wait_window(dialog)
-            
-            # Update selected chapters if user clicked OK
-            if hasattr(dialog, 'result') and dialog.result is not None:
-                self.selected_chapters = dialog.result
-                
-                # Update button text to show selection
-                total_chapters = len(chapters)
-                selected_count = len(self.selected_chapters)
-                
-                if selected_count == total_chapters:
-                    self.chapter_btn.configure(text="Todos los capítulos seleccionados")
-                elif selected_count == 0:
-                    self.chapter_btn.configure(text="Ningún capítulo seleccionado")
-                    self.selected_chapters = None
-                else:
-                    self.chapter_btn.configure(text=f"{selected_count} de {total_chapters} capítulos seleccionados")
-            
-            loop.close()
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al cargar los capítulos: {str(e)}")
-            print(f"Error in select_chapters: {e}")
+        # Update text
+        status_text = "▲ Ocultar" if self.chapter_container.winfo_viewable() else "▼ Mostrar"
+        self.chapter_toggle_btn.configure(
+            text=f"{status_text} Capítulos — {selected_count}/{total_chapters} seleccionados ({sel_chars:,} caract.)"
+        )
+
+    def toggle_chapter_panel(self):
+        """Toggle the visibility of the chapters list frame"""
+        if self.chapter_container.winfo_viewable():
+            self.chapter_container.grid_remove()
+        else:
+            self.chapter_container.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+        self._update_chapter_toggle_btn_text()
+
+    def _select_all_chapters(self):
+        if not hasattr(self, 'chapter_vars'):
+            return
+        for var in self.chapter_vars:
+            var.set(True)
+        self.selected_chapters = list(range(len(self.chapters_data)))
+        self._update_chapter_toggle_btn_text()
+        
+    def _deselect_all_chapters(self):
+        if not hasattr(self, 'chapter_vars'):
+            return
+        for var in self.chapter_vars:
+            var.set(False)
+        self.selected_chapters = []
+        self._update_chapter_toggle_btn_text()
     
     def browse_file(self):
         """Open file dialog to select input file"""
@@ -596,8 +862,10 @@ class TextToSpeechApp(ctk.CTk):
             self.file_entry.delete(0, tk.END)
             self.file_entry.insert(0, filename)
             
-            # Enable chapter selection button
-            self.chapter_btn.configure(state=tk.NORMAL)
+            # Load chapters and populate collapsible panel
+            self.selected_chapters = None
+            self.chapter_container.grid_remove()
+            self.load_file_chapters()
             
             # Set default output filename
             output_name = f"{Path(filename).stem}.mp3"
@@ -629,6 +897,30 @@ class TextToSpeechApp(ctk.CTk):
                     f"Descarga primero el modelo:\n{selected_voice}"
                 )
                 return
+        elif self.engine_mode.get() == "chatterbox":
+            if not self.chatterbox_manager or not self.chatterbox_manager.is_available():
+                messagebox.showerror("Componentes faltantes", "Instale primero los componentes de IA local desde el panel de Chatterbox.")
+                return
+            
+            voice_mode = self.cb_voice_mode_var.get()
+            if voice_mode == "Voz Predeterminada":
+                selected_voice = "default"
+            else:
+                selected_voice = self.cb_ref_audio_entry.get().strip()
+                if not selected_voice or not os.path.exists(selected_voice):
+                    messagebox.showerror("Error", "Por favor seleccione un archivo de audio de referencia válido.")
+                    return
+        elif self.engine_mode.get() == "kokoro":
+            if not self.kokoro_manager or not self.kokoro_manager.is_available():
+                messagebox.showerror("Componentes faltantes", "Instale primero la librería kokoro-onnx.")
+                return
+            if not self.kokoro_manager.is_downloaded():
+                messagebox.showerror("Modelo no descargado", "Descarga primero el modelo de Kokoro desde su panel.")
+                return
+            selected_voice = self.kokoro_voice_var.get()
+            if not selected_voice:
+                messagebox.showerror("Error", "Por favor seleccione una voz de Kokoro.")
+                return
         else:
             selected_voice = self.voice_var.get()
             if not selected_voice:
@@ -655,7 +947,7 @@ class TextToSpeechApp(ctk.CTk):
             self.voice_dropdown.configure(state=tk.DISABLED)
             self.lang_dropdown.configure(state=tk.DISABLED)
             self.gender_dropdown.configure(state=tk.DISABLED)
-            self.chapter_btn.configure(state=tk.DISABLED)
+            self.chapter_toggle_btn.configure(state=tk.DISABLED)
             self.cancel_btn.configure(state=tk.NORMAL)  # Enable cancel button during processing
         else:
             self.convert_btn.configure(state=tk.NORMAL)
@@ -663,7 +955,7 @@ class TextToSpeechApp(ctk.CTk):
             self.voice_dropdown.configure(state="readonly")
             self.lang_dropdown.configure(state="readonly")
             self.gender_dropdown.configure(state="readonly")
-            self.chapter_btn.configure(state=tk.NORMAL if self.input_file else tk.DISABLED)
+            self.chapter_toggle_btn.configure(state=tk.NORMAL if self.input_file else tk.DISABLED)
             self.cancel_btn.configure(state=tk.NORMAL)  # Keep cancel button enabled by default
     
     def run_conversion(self):
@@ -675,6 +967,14 @@ class TextToSpeechApp(ctk.CTk):
             # Get the selected voice (depends on engine mode)
             if self.engine_mode.get() == "offline":
                 voice_name = self.piper_voice_var.get()
+            elif self.engine_mode.get() == "chatterbox":
+                voice_mode = self.cb_voice_mode_var.get()
+                if voice_mode == "Voz Predeterminada":
+                    voice_name = "default"
+                else:
+                    voice_name = self.cb_ref_audio_entry.get().strip()
+            elif self.engine_mode.get() == "kokoro":
+                voice_name = self.kokoro_voice_var.get()
             else:
                 voice_name = self.voice_var.get()
 
@@ -792,7 +1092,11 @@ class TextToSpeechApp(ctk.CTk):
                     content = [content[i] for i in self.selected_chapters 
                              if 0 <= i < len(content)]
                     self.total_chapters = len(content)
-                    self.after(0, lambda: self.update_progress_ui(total_chars=total_chars))
+                    total_chars = sum(
+                        len(chapter.get('content', '') if isinstance(chapter, dict) else str(chapter))
+                        for chapter in content
+                    )
+                    self.after(0, lambda: self.update_progress_ui(total_chapters=self.total_chapters, total_chars=total_chars))
                 
                 self.current_chapter = 0
                 
@@ -802,6 +1106,25 @@ class TextToSpeechApp(ctk.CTk):
                     
                     # Get chapter content and character count
                     chapter_content = chapter.get('content', '') if isinstance(chapter, dict) else str(chapter)
+                    
+                    # Skip empty chapters to prevent ValueError crashes
+                    if not chapter_content or not chapter_content.strip():
+                        print(f"Saltando capítulo vacío {i+1}: {chapter.get('title', 'Sin título') if isinstance(chapter, dict) else 'Capítulo ' + str(i+1)}")
+                        processed_before = sum(
+                            len(c.get('content', '') if isinstance(c, dict) else str(c))
+                            for c in content[:i]
+                        )
+                        self.after(0, lambda i=i, total=len(content), current_chars=processed_before: 
+                            self.progress_callback(
+                                i + 1, 
+                                total,
+                                current_chars,
+                                total_chars,
+                                i + 1
+                            )
+                        )
+                        continue
+                        
                     chapter_chars = len(chapter_content)
                     
                     # Update progress for new chapter
@@ -942,3 +1265,84 @@ class TextToSpeechApp(ctk.CTk):
         messagebox.showerror("Error", 
             f"Ocurrió un error durante la conversión:\n{error_msg}")
         self.progress_bar.set(0)
+
+    # ─── Kokoro panel helpers ──────────────────────────────────────────────────
+
+    def _check_kokoro_status(self):
+        """Verifica si Kokoro está listo (librerías instaladas y modelos descargados)."""
+        if not self.kokoro_manager:
+            return
+
+        if not self.kokoro_manager.is_available():
+            self.kokoro_status_lbl.configure(
+                text="Falta instalar dependencias de Kokoro (kokoro-onnx)",
+                text_color="#F44336"
+            )
+            self.kokoro_dl_btn.configure(state=tk.DISABLED)
+            self.kokoro_voice_dropdown.configure(state=tk.DISABLED)
+            return
+
+        if self.kokoro_manager.is_downloaded():
+            import onnxruntime as ort
+            providers = ort.get_available_providers()
+            device_str = "GPU (CUDA)" if "CUDAExecutionProvider" in providers else "CPU"
+            self.kokoro_status_lbl.configure(
+                text=f"Modelo Kokoro listo para usar offline. Dispositivo de IA: {device_str}",
+                text_color="#4CAF50"
+            )
+            self.kokoro_dl_btn.grid_remove()
+            self.kokoro_voice_dropdown.configure(state="readonly")
+        else:
+            self.kokoro_status_lbl.configure(
+                text="Componentes listos. Requiere descargar modelo (180MB)",
+                text_color="#FF9800"
+            )
+            self.kokoro_dl_btn.grid()
+            self.kokoro_dl_btn.configure(state=tk.NORMAL)
+            self.kokoro_voice_dropdown.configure(state=tk.DISABLED)
+
+    def _update_kokoro_voices(self, event=None):
+        """Actualiza el desplegable de voces de Kokoro según el idioma seleccionado."""
+        if not self.kokoro_manager:
+            return
+        lang_map = {"Español": "es", "Inglés": "en"}
+        lang = lang_map.get(self.kokoro_lang_var.get())
+        self.kokoro_manager.update_filters(language=lang)
+        names = self.kokoro_manager.get_voice_names()
+        self.kokoro_voice_dropdown.configure(values=names)
+        if names:
+            self.kokoro_voice_var.set(names[0])
+
+    def _download_kokoro_model(self):
+        """Descarga el modelo ONNX y voices bin en segundo plano."""
+        self.kokoro_dl_btn.configure(state=tk.DISABLED)
+        self.kokoro_dl_bar.grid()
+        self.kokoro_dl_bar.set(0)
+
+        def progress_cb(downloaded, total, filename):
+            percentage = downloaded / total
+            def update_ui():
+                self.kokoro_dl_bar.set(percentage)
+                self.kokoro_status_lbl.configure(
+                    text=f"Descargando {filename}... {percentage*100:.1f}%"
+                )
+            self.after(0, update_ui)
+
+        def run_dl():
+            try:
+                self.kokoro_manager.download_model(progress_callback=progress_cb)
+                def success_ui():
+                    self.kokoro_dl_bar.grid_remove()
+                    self._check_kokoro_status()
+                    self._update_kokoro_voices()
+                    messagebox.showinfo("Descarga Exitosa", "El modelo y las voces de Kokoro se han descargado correctamente.")
+                self.after(0, success_ui)
+            except Exception as e:
+                def error_ui():
+                    self.kokoro_dl_bar.grid_remove()
+                    self.kokoro_dl_btn.configure(state=tk.NORMAL)
+                    self._check_kokoro_status()
+                    messagebox.showerror("Error", f"Fallo al descargar el modelo de Kokoro: {e}")
+                self.after(0, error_ui)
+
+        threading.Thread(target=run_dl, daemon=True).start()

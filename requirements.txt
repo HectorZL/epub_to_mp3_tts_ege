@@ -4,3 +4,5 @@ PyPDF2>=3.0.0
 EbookLib>=0.18.0
 piper-tts>=1.4.0
 soundfile>=0.13.0
+kokoro-onnx==0.5.0
+onnxruntime-gpu==1.20.1
