@@ -5,6 +5,7 @@ Maneja la detección de dependencias, descarga de modelos, inicialización de ko
 import os
 import sys
 import urllib.request
+import threading
 from pathlib import Path
 from typing import List, Dict, Optional, Callable
 import soundfile as sf
@@ -55,6 +56,7 @@ class KokoroVoiceManager:
         self.kokoro = None
         self._catalog = KOKORO_VOICES
         self._filtered: List[str] = list(self._catalog.keys())
+        self._lock = threading.RLock()
         
         # Enlaces de descarga oficiales para v1.0
         self.model_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx"
@@ -127,48 +129,49 @@ class KokoroVoiceManager:
 
     def _load_model(self):
         """Carga e inicializa el modelo Kokoro (Lazy Loading)."""
-        if self.kokoro is not None:
-            return
+        with self._lock:
+            if self.kokoro is not None:
+                return
 
-        if not self.is_available():
-            raise ImportError(
-                "La librería 'kokoro-onnx' o 'onnxruntime' no está instalada."
-            )
+            if not self.is_available():
+                raise ImportError(
+                    "La librería 'kokoro-onnx' o 'onnxruntime' no está instalada."
+                )
+                
+            if not self.is_downloaded():
+                raise FileNotFoundError(
+                    "El modelo de Kokoro no está descargado. Por favor, descárgalo desde la sección Kokoro."
+                )
+
+            # Precargar DLLs de CUDA/cuDNN desde PyTorch si están disponibles
+            try:
+                import torch
+                torch_lib = Path(torch.__file__).parent / "lib"
+                if torch_lib.exists():
+                    print(f"Pre-cargando DLLs de CUDA/cuDNN desde PyTorch: {torch_lib}")
+                    os.add_dll_directory(str(torch_lib))
+                    os.environ["PATH"] = str(torch_lib) + os.pathsep + os.environ["PATH"]
+            except Exception as e:
+                print(f"Advertencia al pre-cargar DLLs de PyTorch: {e}")
+
+            from kokoro_onnx import Kokoro
+            import onnxruntime as ort
+
+            # Detección inteligente de aceleradores (CUDA en ONNX runtime)
+            available_providers = ort.get_available_providers()
+            print(f"Proveedores de ejecución ONNX disponibles: {available_providers}")
             
-        if not self.is_downloaded():
-            raise FileNotFoundError(
-                "El modelo de Kokoro no está descargado. Por favor, descárgalo desde la sección Kokoro."
-            )
+            # Preferir CUDA si está disponible, de lo contrario CPU
+            if "CUDAExecutionProvider" in available_providers:
+                os.environ["ONNX_PROVIDER"] = "CUDAExecutionProvider"
+                print("Configurando ONNX_PROVIDER a CUDAExecutionProvider")
+            else:
+                os.environ["ONNX_PROVIDER"] = "CPUExecutionProvider"
+                print("Configurando ONNX_PROVIDER a CPUExecutionProvider")
 
-        # Precargar DLLs de CUDA/cuDNN desde PyTorch si están disponibles
-        try:
-            import torch
-            torch_lib = Path(torch.__file__).parent / "lib"
-            if torch_lib.exists():
-                print(f"Pre-cargando DLLs de CUDA/cuDNN desde PyTorch: {torch_lib}")
-                os.add_dll_directory(str(torch_lib))
-                os.environ["PATH"] = str(torch_lib) + os.pathsep + os.environ["PATH"]
-        except Exception as e:
-            print(f"Advertencia al pre-cargar DLLs de PyTorch: {e}")
-
-        from kokoro_onnx import Kokoro
-        import onnxruntime as ort
-
-        # Detección inteligente de aceleradores (CUDA en ONNX runtime)
-        available_providers = ort.get_available_providers()
-        print(f"Proveedores de ejecución ONNX disponibles: {available_providers}")
-        
-        # Preferir CUDA si está disponible, de lo contrario CPU
-        if "CUDAExecutionProvider" in available_providers:
-            os.environ["ONNX_PROVIDER"] = "CUDAExecutionProvider"
-            print("Configurando ONNX_PROVIDER a CUDAExecutionProvider")
-        else:
-            os.environ["ONNX_PROVIDER"] = "CPUExecutionProvider"
-            print("Configurando ONNX_PROVIDER a CPUExecutionProvider")
-
-        # Cargar Kokoro
-        self.kokoro = Kokoro(str(self.model_path), str(self.voices_path))
-        print("Modelo Kokoro cargado correctamente.")
+            # Cargar Kokoro
+            self.kokoro = Kokoro(str(self.model_path), str(self.voices_path))
+            print("Modelo Kokoro cargado correctamente.")
 
     def synthesize(
         self,
@@ -196,13 +199,14 @@ class KokoroVoiceManager:
         print(f"Sintetizando con Kokoro (Voz: {voice_id}, Lang: {lang}, Texto: {clean_text[:50]}...)")
 
         try:
-            # Generar audio con kokoro-onnx (retorna numpy array y sample rate)
-            samples, sample_rate = self.kokoro.create(
-                text=clean_text,
-                voice=voice_id,
-                speed=speed,
-                lang=lang
-            )
+            # Generar audio con kokoro-onnx (retorna numpy array y sample rate) de forma segura frente a concurrencia
+            with self._lock:
+                samples, sample_rate = self.kokoro.create(
+                    text=clean_text,
+                    voice=voice_id,
+                    speed=speed,
+                    lang=lang
+                )
             
             # --- INYECCIÓN DE SILENCIO / RESPIRACIÓN ---
             # Agrega 0.4 segundos de silencio al final de cada párrafo

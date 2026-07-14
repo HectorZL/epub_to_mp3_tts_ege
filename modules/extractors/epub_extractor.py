@@ -183,6 +183,31 @@ class EPUBExtractor(BaseExtractor):
                 element.decompose()
             
             paragraphs = []
+            block_tags = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'dt', 'dd', 'tr', 'section', 'article', 'aside', 'header', 'footer', 'title'}
+            
+            # Pre-compute elements containing block tag descendants to achieve O(N) traversal
+            has_block_descendant = set()
+            
+            def analyze(element) -> bool:
+                if not element or isinstance(element, str):
+                    return False
+                if element.name in ['script', 'style', 'noscript', 'svg', 'iframe', 'button', 'input', 'select', 'textarea']:
+                    return False
+                
+                contains_block = False
+                for child in element.children:
+                    if not isinstance(child, str):
+                        child_has_block = analyze(child)
+                        if child.name in block_tags or child_has_block:
+                            contains_block = True
+                
+                if contains_block:
+                    has_block_descendant.add(id(element))
+                return contains_block
+            
+            body = soup.find('body')
+            root_element = body if body else soup
+            analyze(root_element)
             
             def walk(element):
                 if not element:
@@ -191,12 +216,9 @@ class EPUBExtractor(BaseExtractor):
                 if element.name in ['script', 'style', 'noscript', 'svg', 'iframe', 'button', 'input', 'select', 'textarea']:
                     return
                     
-                block_tags = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'dt', 'dd', 'tr', 'section', 'article', 'aside', 'header', 'footer', 'title'}
-                
                 if element.name in block_tags:
-                    # Check if it contains nested block tags
-                    has_nested_blocks = any(child.name in block_tags for child in element.find_all() if child.name)
-                    if not has_nested_blocks:
+                    # Check if it contains nested block tags using our pre-computed set in O(1)
+                    if id(element) not in has_block_descendant:
                         text = element.get_text(' ', strip=True)
                         if text:
                             text = re.sub(r'\s+', ' ', text).strip()
@@ -215,8 +237,7 @@ class EPUBExtractor(BaseExtractor):
                             if text:
                                 paragraphs.append(text)
             
-            body = soup.find('body')
-            walk(body if body else soup)
+            walk(root_element)
             
             formatted_paragraphs = []
             for p in paragraphs:

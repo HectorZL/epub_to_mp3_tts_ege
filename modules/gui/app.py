@@ -510,9 +510,38 @@ class TextToSpeechApp(ctk.CTk):
         progress_card.grid(row=7, column=0, padx=5, pady=8, sticky="ew")
         progress_card.grid_columnconfigure(0, weight=1)
 
-        # Action Buttons inside progress card to unify look
+        # Checkboxes for merging and keeping chapters (row 0)
+        self.options_frame = ctk.CTkFrame(progress_card, fg_color="transparent")
+        self.options_frame.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
+
+        self.join_chapters_var = tk.BooleanVar(value=True)
+        self.join_checkbox = ctk.CTkCheckBox(
+            self.options_frame,
+            text="Unir capítulos al finalizar",
+            variable=self.join_chapters_var,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color="#10B981",
+            hover_color="#059669",
+            text_color="#E2E8F0",
+            command=self._on_join_chapters_changed
+        )
+        self.join_checkbox.pack(side=tk.LEFT, padx=(0, 20))
+
+        self.keep_chapters_var = tk.BooleanVar(value=True)
+        self.keep_checkbox = ctk.CTkCheckBox(
+            self.options_frame,
+            text="Conservar capítulos individuales sueltos",
+            variable=self.keep_chapters_var,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color="#10B981",
+            hover_color="#059669",
+            text_color="#E2E8F0"
+        )
+        self.keep_checkbox.pack(side=tk.LEFT)
+
+        # Action Buttons inside progress card to unify look (row 1)
         self.buttons_frame = ctk.CTkFrame(progress_card, fg_color="transparent")
-        self.buttons_frame.grid(row=0, column=0, padx=15, pady=15, sticky="ew")
+        self.buttons_frame.grid(row=1, column=0, padx=15, pady=(5, 15), sticky="ew")
         self.buttons_frame.grid_columnconfigure(0, weight=1)
         self.buttons_frame.grid_columnconfigure(1, weight=1)
 
@@ -536,9 +565,9 @@ class TextToSpeechApp(ctk.CTk):
         )
         self.cancel_btn.grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
-        # Progress bar
+        # Progress bar (row 2)
         self.progress_frame = ctk.CTkFrame(progress_card, fg_color="transparent")
-        self.progress_frame.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
+        self.progress_frame.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="ew")
 
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame, mode="determinate", fg_color="#0F172A", progress_color="#4F46E5", height=10)
         self.progress_bar.pack(fill=tk.X, pady=5)
@@ -628,6 +657,14 @@ class TextToSpeechApp(ctk.CTk):
                     border_color="#334155",
                     font=ctk.CTkFont(family="Segoe UI", size=12)
                 )
+
+    def _on_join_chapters_changed(self):
+        """Enable/disable keep checkbox depending on join chapters selection"""
+        if self.join_chapters_var.get():
+            self.keep_checkbox.configure(state=tk.NORMAL)
+        else:
+            self.keep_chapters_var.set(True)
+            self.keep_checkbox.configure(state=tk.DISABLED)
 
     def _set_engine(self, mode: str):
         """Switch between 'online', 'offline' (Piper), 'chatterbox' and 'kokoro' engine."""
@@ -1110,6 +1147,10 @@ class TextToSpeechApp(ctk.CTk):
             self.gender_dropdown.configure(state=tk.DISABLED)
             self.chapter_toggle_btn.configure(state=tk.DISABLED)
             self.cancel_btn.configure(state=tk.NORMAL)  # Enable cancel button during processing
+            if hasattr(self, 'join_checkbox'):
+                self.join_checkbox.configure(state=tk.DISABLED)
+            if hasattr(self, 'keep_checkbox'):
+                self.keep_checkbox.configure(state=tk.DISABLED)
         else:
             self.convert_btn.configure(state=tk.NORMAL)
             self.browse_btn.configure(state=tk.NORMAL)
@@ -1118,6 +1159,13 @@ class TextToSpeechApp(ctk.CTk):
             self.gender_dropdown.configure(state="readonly")
             self.chapter_toggle_btn.configure(state=tk.NORMAL if self.input_file else tk.DISABLED)
             self.cancel_btn.configure(state=tk.NORMAL)  # Keep cancel button enabled by default
+            if hasattr(self, 'join_checkbox'):
+                self.join_checkbox.configure(state=tk.NORMAL)
+            if hasattr(self, 'keep_checkbox'):
+                if self.join_chapters_var.get():
+                    self.keep_checkbox.configure(state=tk.NORMAL)
+                else:
+                    self.keep_checkbox.configure(state=tk.DISABLED)
     
     def run_conversion(self):
         """Run the conversion process in a background thread"""
@@ -1188,6 +1236,14 @@ class TextToSpeechApp(ctk.CTk):
     async def _convert_file(self, input_file: str, output_file: str, voice_name: str):
         """Convert the file using the audio converter"""
         try:
+            if hasattr(self, 'selected_chapters') and self.selected_chapters:
+                chap_numbers = [idx + 1 for idx in self.selected_chapters]
+                min_chap = min(chap_numbers)
+                max_chap = max(chap_numbers)
+                suffix = f"_{min_chap}_{max_chap}" if min_chap != max_chap else f"_{min_chap}"
+                base, ext = os.path.splitext(output_file)
+                output_file = f"{base}{suffix}{ext}"
+
             # Reset progress tracking at start of conversion
             self.after(0, self.reset_ui_state)
             
@@ -1262,6 +1318,7 @@ class TextToSpeechApp(ctk.CTk):
                 self.current_chapter = 0
                 
                 # Convert each chapter
+                chapter_files = []
                 for i, chapter in enumerate(content):
                     self.current_chapter = i + 1
                     
@@ -1328,6 +1385,20 @@ class TextToSpeechApp(ctk.CTk):
                                 i + 1
                             )
                     )
+                    chapter_files.append(chapter_output)
+                
+                # Merge chapters if requested
+                if self.join_chapters_var.get() and chapter_files:
+                    self.after(0, lambda: self.status_var.set("Uniendo capítulos..."))
+                    self.audio_converter._combine_audio_files(chapter_files, output_file)
+                    
+                    if not self.keep_chapters_var.get():
+                        for f in chapter_files:
+                            try:
+                                if os.path.exists(f):
+                                    os.remove(f)
+                            except Exception as e:
+                                print(f"Error al borrar archivo individual {f}: {e}")
                     
         except Exception as e:
             raise Exception(f"Error en la conversión: {str(e)}")

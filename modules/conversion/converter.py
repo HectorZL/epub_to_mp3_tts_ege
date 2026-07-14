@@ -36,10 +36,13 @@ class AudioConverter:
             
         if not voice_name:
             raise ValueError("No se ha seleccionado una voz")
-            
         self.is_processing = True
         self.is_paused = False
         self.is_cancelled = False
+        
+        temp_files = []
+        temp_dir = None
+        success = False
         
         try:
             # Get the full voice details (only needed for edge-tts)
@@ -77,120 +80,158 @@ class AudioConverter:
             if not chunks:
                 raise ValueError("No se pudo dividir el texto en fragmentos válidos")
             
-            # Temporary files for chunks
-            temp_files = []
-            
+            # Create a dedicated temp directory for this output file's chunks
+            base_dir = os.path.dirname(os.path.abspath(output_file))
+            output_filename = os.path.basename(output_file)
+            temp_dir = os.path.join(base_dir, f".temp_{output_filename}_chunks")
+            os.makedirs(temp_dir, exist_ok=True)
+
+            # Prepare chunks and associate with temp file names
+            tasks_data = []
             for i, chunk in enumerate(chunks, 1):
-                if self.is_cancelled:
-                    self._cleanup_temp_files(temp_files)
-                    return False
-                    
-                while self.is_paused and not self.is_cancelled:
-                    await asyncio.sleep(0.5)
-                    
-                if self.is_cancelled:
-                    self._cleanup_temp_files(temp_files)
-                    return False
-                
-                # Skip empty chunks
-                if not chunk or not chunk.strip():
-                    continue
-                    
-                # Create temp file for this chunk
-                temp_file = f"temp_chunk_{i}.mp3"
-                temp_files.append(temp_file)
-                
-                try:
-                    # --- PROSODIA HEURÍSTICA Y SENTIMIENTOS ---
-                    current_rate = rate  # from method definition fallback (-10%)
-                    current_pitch = "+0Hz"
-                    current_volume = volume # from method definition
-                    
-                    if "!" in chunk or "¡" in chunk:
-                        current_pitch = "+10Hz"
-                        current_rate = "+0%"  # Accelerates due to exclamation
-                    elif "?" in chunk or "¿" in chunk:
-                        current_pitch = "+5Hz"
-                    elif '"' in chunk or "—" in chunk or "«" in chunk or "-" in chunk:
-                        current_pitch = "+2Hz"
-                        current_volume = "+5%"
-                    else:
-                        pass # Normal reading
-                        
-                    if self.engine_mode == "offline" and self.piper_manager:
-                        # ── Piper offline ─────────────────────────────────
-                        tmp_wav = temp_file.replace(".mp3", ".wav")
-                        self.piper_manager.synthesize(chunk, voice_name, tmp_wav)
-                        self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
-                        try:
-                            os.remove(tmp_wav)
-                        except Exception:
-                            pass
-                    elif self.engine_mode == "chatterbox" and self.chatterbox_manager:
-                        # ── Chatterbox offline ────────────────────────────
-                        tmp_wav = temp_file.replace(".mp3", ".wav")
-                        audio_prompt = None if voice_name == "default" else voice_name
-                        self.chatterbox_manager.synthesize(chunk, tmp_wav, audio_prompt_path=audio_prompt)
-                        # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
-                        if self.piper_manager:
-                            self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
-                        else:
-                            # Fallback si piper_manager no está disponible
-                            import soundfile as sf
-                            data, samplerate = sf.read(tmp_wav)
-                            sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
-                        try:
-                            os.remove(tmp_wav)
-                        except Exception:
-                            pass
-                    elif self.engine_mode == "kokoro" and self.kokoro_manager:
-                        # ── Kokoro offline ────────────────────────────────
-                        tmp_wav = temp_file.replace(".mp3", ".wav")
-                        self.kokoro_manager.synthesize(chunk, voice_name, tmp_wav)
-                        # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
-                        if self.piper_manager:
-                            self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
-                        else:
-                            # Fallback si piper_manager no está disponible
-                            import soundfile as sf
-                            data, samplerate = sf.read(tmp_wav)
-                            sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
-                        try:
-                            os.remove(tmp_wav)
-                        except Exception:
-                            pass
-                    else:
-                        # ── edge-tts online ───────────────────────────────
-                        # Truco SSML para pausas invisibles
-                        chunk_text = chunk + "...\n\n"
-                        communicate = edge_tts.Communicate(
-                            text=chunk_text,
-                            voice=voice['Name'],
-                            rate=current_rate,
-                            volume=current_volume,
-                            pitch=current_pitch
-                        )
-                        try:
-                            await asyncio.wait_for(communicate.save(temp_file), timeout=300)
-                        except asyncio.TimeoutError:
-                            raise Exception("Tiempo de espera agotado al generar el audio. Intente con un texto mas corto.")
-                    
-                    # Verify the output file was created and has content
-                    if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
-                        raise Exception(f"No se recibió audio para el fragmento {i}. Intente nuevamente.")
-                    
-                    # Update progress
-                    if progress_callback:
-                        progress_callback(i, total_chunks)
-                        
-                except Exception as e:
-                    # Clean up any partial files before re-raising
-                    self._cleanup_temp_files(temp_files)
-                    raise Exception(f"Error procesando el fragmento {i}/{total_chunks}: {str(e)}")
+                if chunk and chunk.strip():
+                    temp_file = os.path.join(temp_dir, f"chunk_{i}.mp3")
+                    tasks_data.append((i, chunk, temp_file))
             
             # If no valid chunks were processed
-            if not temp_files:
+            if not tasks_data:
                 raise ValueError("No se pudo generar ningún fragmento de audio válido")
+            
+            temp_files = [item[2] for item in tasks_data]
+            total_chunks = len(tasks_data)
+            
+            # Use Semaphore to control concurrency levels
+            concurrency_limit = 3 if self.engine_mode == "online" else 2
+            sem = asyncio.Semaphore(concurrency_limit)
+            
+            completed_chunks = 0
+            progress_lock = asyncio.Lock()
+            
+            async def process_task(i, chunk, temp_file):
+                nonlocal completed_chunks
+                
+                async with sem:
+                    if self.is_cancelled:
+                        return
+                        
+                    while self.is_paused and not self.is_cancelled:
+                        await asyncio.sleep(0.5)
+                        
+                    if self.is_cancelled:
+                        return
+                    
+                    # Si el fragmento ya existe y no está vacío, lo reutilizamos directamente
+                    if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                        print(f"Reutilizando fragmento de audio existente: {temp_file}")
+                        async with progress_lock:
+                            completed_chunks += 1
+                            if progress_callback:
+                                progress_callback(completed_chunks, total_chunks)
+                        return
+
+                    try:
+                        # --- PROSODIA HEURÍSTICA Y SENTIMIENTOS ---
+                        current_rate = rate  # from method definition fallback (-10%)
+                        current_pitch = "+0Hz"
+                        current_volume = volume # from method definition
+                        
+                        if "!" in chunk or "¡" in chunk:
+                            current_pitch = "+10Hz"
+                            current_rate = "+0%"  # Accelerates due to exclamation
+                        elif "?" in chunk or "¿" in chunk:
+                            current_pitch = "+5Hz"
+                        elif '"' in chunk or "—" in chunk or "«" in chunk or "-" in chunk:
+                            current_pitch = "+2Hz"
+                            current_volume = "+5%"
+                            
+                        if self.engine_mode == "offline" and self.piper_manager:
+                            # ── Piper offline ─────────────────────────────────
+                            def run_piper():
+                                tmp_wav = os.path.splitext(temp_file)[0] + ".wav"
+                                self.piper_manager.synthesize(chunk, voice_name, tmp_wav)
+                                self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                                try:
+                                    os.remove(tmp_wav)
+                                except Exception:
+                                    pass
+                            await asyncio.get_event_loop().run_in_executor(None, run_piper)
+                            
+                        elif self.engine_mode == "chatterbox" and self.chatterbox_manager:
+                            # ── Chatterbox offline ────────────────────────────
+                            def run_chatterbox():
+                                tmp_wav = os.path.splitext(temp_file)[0] + ".wav"
+                                audio_prompt = None if voice_name == "default" else voice_name
+                                self.chatterbox_manager.synthesize(chunk, tmp_wav, audio_prompt_path=audio_prompt)
+                                # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
+                                if self.piper_manager:
+                                    self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                                else:
+                                    # Fallback si piper_manager no está disponible
+                                    import soundfile as sf
+                                    data, samplerate = sf.read(tmp_wav)
+                                    sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
+                                try:
+                                    os.remove(tmp_wav)
+                                except Exception:
+                                    pass
+                            await asyncio.get_event_loop().run_in_executor(None, run_chatterbox)
+                            
+                        elif self.engine_mode == "kokoro" and self.kokoro_manager:
+                            # ── Kokoro offline ────────────────────────────────
+                            def run_kokoro():
+                                tmp_wav = os.path.splitext(temp_file)[0] + ".wav"
+                                self.kokoro_manager.synthesize(chunk, voice_name, tmp_wav)
+                                # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
+                                if self.piper_manager:
+                                    self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                                else:
+                                    # Fallback si piper_manager no está disponible
+                                    import soundfile as sf
+                                    data, samplerate = sf.read(tmp_wav)
+                                    sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
+                                try:
+                                    os.remove(tmp_wav)
+                                except Exception:
+                                    pass
+                            await asyncio.get_event_loop().run_in_executor(None, run_kokoro)
+                            
+                        else:
+                            # ── edge-tts online ───────────────────────────────
+                            # Truco SSML para pausas invisibles
+                            chunk_text = chunk + "...\n\n"
+                            communicate = edge_tts.Communicate(
+                                text=chunk_text,
+                                voice=voice['Name'],
+                                rate=current_rate,
+                                volume=current_volume,
+                                pitch=current_pitch
+                            )
+                            try:
+                                await asyncio.wait_for(communicate.save(temp_file), timeout=300)
+                            except asyncio.TimeoutError:
+                                raise Exception("Tiempo de espera agotado al generar el audio. Intente con un texto mas corto.")
+                        
+                        # Verify the output file was created and has content
+                        if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
+                            raise Exception(f"No se recibió audio para el fragmento {i}. Intente nuevamente.")
+                        
+                        # Update progress safely
+                        async with progress_lock:
+                            completed_chunks += 1
+                            if progress_callback:
+                                progress_callback(completed_chunks, total_chunks)
+                                
+                    except Exception as e:
+                        raise Exception(f"Error procesando el fragmento {i}/{total_chunks}: {str(e)}")
+ 
+            # Run all tasks concurrently
+            tasks = [process_task(i, chunk, temp_file) for i, chunk, temp_file in tasks_data]
+            
+            try:
+                await asyncio.gather(*tasks)
+            except Exception as e:
+                # No eliminamos los archivos parciales aquí para poder reanudar el trabajo en caso de fallo
+                raise
             
             # Combine all chunks into the final file
             self._combine_audio_files(temp_files, output_file)
@@ -199,6 +240,7 @@ class AudioConverter:
             if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
                 raise Exception("No se pudo generar el archivo de audio final")
             
+            success = True
             return True
             
         except Exception as e:
@@ -212,7 +254,14 @@ class AudioConverter:
             
         finally:
             self.is_processing = False
-            self._cleanup_temp_files(temp_files)
+            # Solo limpiamos los fragmentos si la conversión de este lote fue completamente exitosa
+            if success:
+                self._cleanup_temp_files(temp_files)
+                try:
+                    if temp_dir and os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                        os.rmdir(temp_dir)
+                except Exception as e:
+                    print(f"Warning: Could not remove temp directory {temp_dir}: {e}")
     
     async def convert_file(
         self,
@@ -223,9 +272,19 @@ class AudioConverter:
         volume: str = "+0%",
         selected_chapters: Optional[List[int]] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        join_chapters: bool = True,
+        keep_chapters: bool = True,
     ) -> None:
         """Convert text file to speech with progress tracking and chapter support"""
         try:
+            if selected_chapters:
+                chap_numbers = [idx + 1 for idx in selected_chapters]
+                min_chap = min(chap_numbers)
+                max_chap = max(chap_numbers)
+                suffix = f"_{min_chap}_{max_chap}" if min_chap != max_chap else f"_{min_chap}"
+                base, ext = os.path.splitext(output_path)
+                output_path = f"{base}{suffix}{ext}"
+
             # Get the extractor for the input file type
             extractor = get_extractor(input_path)
             
@@ -259,6 +318,7 @@ class AudioConverter:
                 
                 # Convert each chapter
                 total_chapters = len(result)
+                chapter_files = []
                 for i, (original_idx, chapter) in enumerate(result):
                     chapter_content = chapter.get('content', '')
                     if not chapter_content or not chapter_content.strip():
@@ -279,6 +339,12 @@ class AudioConverter:
                     # Include the original chapter number in the filename
                     chapter_output = f"{base}_Cap{original_idx + 1:02d}_{chapter_name}{ext}"
                     
+                    # Si el archivo del capítulo ya existe y no está vacío, lo omitimos
+                    if os.path.exists(chapter_output) and os.path.getsize(chapter_output) > 0:
+                        print(f"Capítulo ya convertido, reutilizando: {chapter_output}")
+                        chapter_files.append(chapter_output)
+                        continue
+
                     await self.convert_text_to_speech(
                         text=chapter_content,
                         voice_name=voice_name,
@@ -287,7 +353,19 @@ class AudioConverter:
                         volume=volume,
                         progress_callback=None  # No progress for individual chapters
                     )
+                    chapter_files.append(chapter_output)
                 
+                # Merge chapters if requested
+                if join_chapters and chapter_files:
+                    self._combine_audio_files(chapter_files, output_path)
+                    if not keep_chapters:
+                        for f in chapter_files:
+                            try:
+                                if os.path.exists(f):
+                                    os.remove(f)
+                            except Exception as e:
+                                print(f"Warning: Could not remove chapter file {f}: {e}")
+
                 if progress_callback:
                     progress_callback(total_chapters, total_chapters)
             
