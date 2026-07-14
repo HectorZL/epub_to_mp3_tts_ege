@@ -71,187 +71,264 @@ class TextToSpeechApp(ctk.CTk):
         threading.Thread(target=run_async, daemon=True).start()
     
     def setup_ui(self):
-        # Main frame
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        self.main_frame.grid_columnconfigure(1, weight=1)
+        # Configure window background
+        self.configure(fg_color="#0F172A")
+        
+        # Main container
+        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_frame.grid(row=0, column=0, padx=20, pady=15, sticky="nsew")
+        self.main_frame.grid_columnconfigure(0, weight=1)
 
-        # ── Title ─────────────────────────────────────────────────────────────
+        # ── Title Block ────────────────────────────────────────────────────────
+        title_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        title_frame.grid(row=0, column=0, pady=(10, 20), sticky="ew")
+        title_frame.grid_columnconfigure(0, weight=1)
+        
         title_label = ctk.CTkLabel(
+            title_frame,
+            text="🎧 AudioBook Studio",
+            font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
+            text_color="#F8FAFC"
+        )
+        title_label.grid(row=0, column=0, sticky="center")
+        
+        subtitle_label = ctk.CTkLabel(
+            title_frame,
+            text="Convierte tus libros electrónicos (EPUB, PDF) a audiolibros realistas mediante IA local u online",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color="#64748B"
+        )
+        subtitle_label.grid(row=1, column=0, pady=(2, 0), sticky="center")
+
+        # ── Card 1: Motor TTS (row 2) ──────────────────────────────────────────
+        engine_card = ctk.CTkFrame(
             self.main_frame,
-            text="Conversor de Libros a Audio",
-            font=("Arial", 24, "bold")
+            fg_color="#1E293B",
+            corner_radius=12,
+            border_color="#334155",
+            border_width=1
         )
-        title_label.grid(row=0, column=0, columnspan=3, pady=20)
+        engine_card.grid(row=2, column=0, padx=5, pady=8, sticky="ew")
+        engine_card.grid_columnconfigure(1, weight=1)
 
-        # ── Engine toggle ──────────────────────────────────────────────────────
-        engine_frame = ctk.CTkFrame(self.main_frame)
-        engine_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=(0, 8), sticky="ew")
-        engine_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            engine_card,
+            text="⚡ Motor de Voz (TTS):",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color="#E2E8F0"
+        ).grid(row=0, column=0, padx=15, pady=15, sticky="w")
 
-        ctk.CTkLabel(engine_frame, text="Motor TTS:", font=("Arial", 12, "bold")).grid(
-            row=0, column=0, padx=10, pady=8, sticky="w"
-        )
-
-        toggle_inner = ctk.CTkFrame(engine_frame, fg_color="transparent")
+        toggle_inner = ctk.CTkFrame(engine_card, fg_color="transparent")
         toggle_inner.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
         self.btn_online = ctk.CTkButton(
-            toggle_inner, text="Online (edge-tts)", width=140,
-            command=lambda: self._set_engine("online"),
-            fg_color="#1565C0", hover_color="#1976D2"
+            toggle_inner, text="Online (edge-tts)", width=140, height=32,
+            command=lambda: self._set_engine("online")
         )
         self.btn_online.pack(side=tk.LEFT, padx=(0, 6))
 
         self.btn_offline = ctk.CTkButton(
-            toggle_inner, text="Offline (Piper)", width=140,
-            command=lambda: self._set_engine("offline"),
-            fg_color="#424242", hover_color="#616161"
+            toggle_inner, text="Offline (Piper)", width=140, height=32,
+            command=lambda: self._set_engine("offline")
         )
         self.btn_offline.pack(side=tk.LEFT)
 
         self.btn_chatterbox = ctk.CTkButton(
-            toggle_inner, text="Offline (Chatterbox)", width=140,
-            command=lambda: self._set_engine("chatterbox"),
-            fg_color="#424242", hover_color="#616161"
+            toggle_inner, text="Offline (Chatterbox)", width=140, height=32,
+            command=lambda: self._set_engine("chatterbox")
         )
         self.btn_chatterbox.pack(side=tk.LEFT, padx=(6, 0))
 
         self.btn_kokoro = ctk.CTkButton(
-            toggle_inner, text="Offline (Kokoro)", width=140,
-            command=lambda: self._set_engine("kokoro"),
-            fg_color="#424242", hover_color="#616161"
+            toggle_inner, text="Offline (Kokoro)", width=140, height=32,
+            command=lambda: self._set_engine("kokoro")
         )
         self.btn_kokoro.pack(side=tk.LEFT, padx=(6, 0))
 
         self.engine_badge = ctk.CTkLabel(
-            engine_frame, text="● Online", text_color="#4CAF50",
-            font=("Arial", 11, "bold")
+            engine_card, text="● Online", text_color="#10B981",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")
         )
-        self.engine_badge.grid(row=0, column=2, padx=10)
+        self.engine_badge.grid(row=0, column=2, padx=15)
 
-        # ── File selection ─────────────────────────────────────────────────────
-        file_label = ctk.CTkLabel(self.main_frame, text="Archivo:")
-        file_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        # ── Card 2: File selection (row 3) ──────────────────────────────────────
+        file_card = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="#1E293B",
+            corner_radius=12,
+            border_color="#334155",
+            border_width=1
+        )
+        file_card.grid(row=3, column=0, padx=5, pady=8, sticky="ew")
+        file_card.grid_columnconfigure(1, weight=1)
 
-        self.file_entry = ctk.CTkEntry(self.main_frame, width=400)
-        self.file_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(
+            file_card,
+            text="📁 Libro de Origen:",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color="#E2E8F0"
+        ).grid(row=0, column=0, padx=15, pady=15, sticky="w")
+
+        self.file_entry = ctk.CTkEntry(
+            file_card,
+            placeholder_text="Selecciona un archivo EPUB o PDF para comenzar...",
+            height=36,
+            fg_color="#0F172A",
+            border_color="#334155",
+            border_width=1,
+            text_color="#F1F5F9",
+            corner_radius=8
+        )
+        self.file_entry.grid(row=0, column=1, padx=5, pady=12, sticky="ew")
 
         self.browse_btn = ctk.CTkButton(
-            self.main_frame, text="Examinar...", command=self.browse_file
+            file_card,
+            text="Examinar...",
+            command=self.browse_file,
+            height=36,
+            fg_color="#334155",
+            hover_color="#475569",
+            text_color="#F1F5F9",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            corner_radius=8
         )
-        self.browse_btn.grid(row=2, column=2, padx=5, pady=5)
+        self.browse_btn.grid(row=0, column=2, padx=15, pady=12)
 
-        # ── Online panel (edge-tts) ────────────────────────────────────────────
-        self.online_panel = ctk.CTkFrame(self.main_frame)
-        self.online_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+        # ── Card 3: Configuration panels (row 4) ─────────────────────────────────
+        self.config_card = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="#1E293B",
+            corner_radius=12,
+            border_color="#334155",
+            border_width=1
+        )
+        self.config_card.grid(row=4, column=0, padx=5, pady=8, sticky="ew")
+        self.config_card.grid_columnconfigure(0, weight=1)
+
+        # ── Online panel (edge-tts) ──
+        self.online_panel = ctk.CTkFrame(self.config_card, fg_color="transparent")
+        self.online_panel.grid(row=0, column=0, padx=15, pady=15, sticky="ew")
         self.online_panel.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(self.online_panel, text="Idioma:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(
+            self.online_panel,
+            text="🎙️ Configuración de Voz (Online Edge-TTS)",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color="#F8FAFC"
+        ).grid(row=0, column=0, columnspan=2, pady=(0, 10), sticky="w")
+
+        ctk.CTkLabel(self.online_panel, text="Idioma:", font=ctk.CTkFont(size=12)).grid(row=1, column=0, padx=5, pady=6, sticky="w")
         self.lang_var = tk.StringVar()
         self.lang_dropdown = ctk.CTkComboBox(
             self.online_panel, variable=self.lang_var,
             values=["Español", "Inglés", "Todos"],
-            state="readonly", command=self.on_language_changed
+            state="readonly", command=self.on_language_changed,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8
         )
         self.lang_dropdown.set("Español")
-        self.lang_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.lang_dropdown.grid(row=1, column=1, padx=5, pady=6, sticky="w")
 
-        ctk.CTkLabel(self.online_panel, text="Género:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(self.online_panel, text="Género:", font=ctk.CTkFont(size=12)).grid(row=2, column=0, padx=5, pady=6, sticky="w")
         self.gender_var = tk.StringVar()
         self.gender_dropdown = ctk.CTkComboBox(
             self.online_panel, variable=self.gender_var,
             values=["Masculino", "Femenino", "Todos"],
-            state="readonly", command=self.on_gender_changed
+            state="readonly", command=self.on_gender_changed,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8
         )
         self.gender_dropdown.set("Femenino")
-        self.gender_dropdown.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        self.gender_dropdown.grid(row=2, column=1, padx=5, pady=6, sticky="w")
 
-        ctk.CTkLabel(self.online_panel, text="Voz:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(self.online_panel, text="Voz:", font=ctk.CTkFont(size=12)).grid(row=3, column=0, padx=5, pady=6, sticky="w")
         self.voice_var = tk.StringVar()
         self.voice_dropdown = ctk.CTkComboBox(
             self.online_panel, variable=self.voice_var,
-            values=[], state="readonly", width=400
+            values=[], state="readonly", width=400,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8
         )
-        self.voice_dropdown.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        self.voice_dropdown.grid(row=3, column=1, padx=5, pady=6, sticky="w")
 
-        # ── Offline panel (Piper) ──────────────────────────────────────────────
-        self.offline_panel = ctk.CTkFrame(self.main_frame)
-        # No shown by default (online is default)
+        # ── Offline panel (Piper) ──
+        self.offline_panel = ctk.CTkFrame(self.config_card, fg_color="transparent")
+        self.offline_panel.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
             self.offline_panel,
-            text="Piper TTS — Offline",
-            font=("Arial", 13, "bold")
-        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(8, 4), sticky="w")
+            text="🎙️ Configuración de Voz (Piper TTS)",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color="#F8FAFC"
+        ).grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
 
-        ctk.CTkLabel(self.offline_panel, text="Idioma:").grid(row=1, column=0, padx=5, pady=4, sticky="w")
+        ctk.CTkLabel(self.offline_panel, text="Idioma:", font=ctk.CTkFont(size=12)).grid(row=1, column=0, padx=5, pady=6, sticky="w")
         self.piper_lang_var = tk.StringVar(value="Español")
         self.piper_lang_dropdown = ctk.CTkComboBox(
             self.offline_panel,
             variable=self.piper_lang_var,
             values=["Español", "Inglés", "Todos"],
             state="readonly",
-            command=self._update_piper_voices
+            command=self._update_piper_voices,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8
         )
-        self.piper_lang_dropdown.grid(row=1, column=1, padx=5, pady=4, sticky="w")
+        self.piper_lang_dropdown.grid(row=1, column=1, padx=5, pady=6, sticky="w")
 
-        # Gender filter removed for Piper as both voices are female by default
         self.piper_gender_var = tk.StringVar(value="Todos")
         
-        ctk.CTkLabel(self.offline_panel, text="Voz Piper:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
+        ctk.CTkLabel(self.offline_panel, text="Voz Piper:", font=ctk.CTkFont(size=12)).grid(row=2, column=0, padx=5, pady=6, sticky="w")
         self.piper_voice_var = tk.StringVar()
         self.piper_voice_dropdown = ctk.CTkComboBox(
             self.offline_panel,
             variable=self.piper_voice_var,
             values=[], state="readonly", width=350,
-            command=self._on_piper_voice_selected
+            command=self._on_piper_voice_selected,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8
         )
-        self.piper_voice_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
+        self.piper_voice_dropdown.grid(row=2, column=1, padx=5, pady=6, sticky="w")
 
         self.piper_dl_btn = ctk.CTkButton(
             self.offline_panel,
             text="Descargar modelo",
             width=140,
-            fg_color="#E65100",
-            hover_color="#F4511E",
+            fg_color="#F97316",
+            hover_color="#EA580C",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            corner_radius=8,
             command=self._download_piper_model
         )
-        self.piper_dl_btn.grid(row=2, column=2, padx=5, pady=4)
+        self.piper_dl_btn.grid(row=2, column=2, padx=10, pady=6)
 
         self.piper_status_lbl = ctk.CTkLabel(
             self.offline_panel,
             text="",
-            font=("Arial", 10),
-            text_color=("#888", "#aaa")
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#94A3B8"
         )
-        self.piper_status_lbl.grid(row=3, column=0, columnspan=3, padx=5, pady=2, sticky="w")
+        self.piper_status_lbl.grid(row=3, column=0, columnspan=3, padx=5, pady=4, sticky="w")
 
-        self.piper_dl_bar = ctk.CTkProgressBar(self.offline_panel, mode="determinate")
-        self.piper_dl_bar.grid(row=4, column=0, columnspan=3, padx=5, pady=(2, 6), sticky="ew")
+        self.piper_dl_bar = ctk.CTkProgressBar(self.offline_panel, mode="determinate", fg_color="#0F172A", progress_color="#4F46E5", height=8)
+        self.piper_dl_bar.grid(row=4, column=0, columnspan=3, padx=5, pady=(4, 6), sticky="ew")
         self.piper_dl_bar.set(0)
-        self.piper_dl_bar.grid_remove()   # hidden until download starts
-
-        self.offline_panel.grid_columnconfigure(1, weight=1)
+        self.piper_dl_bar.grid_remove()
 
         # Initialize Piper voice list
         self._update_piper_voices()
 
-        # ── Chatterbox panel (Chatterbox) ──────────────────────────────────────
-        self.chatterbox_panel = ctk.CTkFrame(self.main_frame)
-        # Oculto por defecto
+        # ── Chatterbox panel (Chatterbox) ──
+        self.chatterbox_panel = ctk.CTkFrame(self.config_card, fg_color="transparent")
+        self.chatterbox_panel.grid_columnconfigure(1, weight=1)
         
         ctk.CTkLabel(
             self.chatterbox_panel,
-            text="Chatterbox TTS — Offline (IA local)",
-            font=("Arial", 13, "bold")
-        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(8, 4), sticky="w")
+            text="🎙️ Configuración de Voz (Chatterbox local)",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color="#F8FAFC"
+        ).grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
 
-        # Estado de dependencias
         self.cb_status_lbl = ctk.CTkLabel(
             self.chatterbox_panel,
             text="Verificando componentes...",
-            font=("Arial", 11)
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#94A3B8"
         )
         self.cb_status_lbl.grid(row=1, column=0, columnspan=2, padx=5, pady=4, sticky="w")
 
@@ -259,14 +336,16 @@ class TextToSpeechApp(ctk.CTk):
             self.chatterbox_panel,
             text="Instalar componentes de IA local",
             width=220,
-            fg_color="#E65100",
-            hover_color="#F4511E",
+            fg_color="#F97316",
+            hover_color="#EA580C",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            corner_radius=8,
             command=self._install_chatterbox_dependencies
         )
-        self.cb_install_btn.grid(row=1, column=2, padx=5, pady=4, sticky="e")
+        self.cb_install_btn.grid(row=1, column=2, padx=10, pady=4, sticky="e")
 
-        # Tipo de voz
-        ctk.CTkLabel(self.chatterbox_panel, text="Voz Chatterbox:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
+        ctk.CTkLabel(self.chatterbox_panel, text="Voz Chatterbox:", font=ctk.CTkFont(size=12)).grid(row=2, column=0, padx=5, pady=6, sticky="w")
         self.cb_voice_mode_var = tk.StringVar(value="Voz Predeterminada")
         self.cb_voice_dropdown = ctk.CTkComboBox(
             self.chatterbox_panel,
@@ -274,43 +353,50 @@ class TextToSpeechApp(ctk.CTk):
             values=["Voz Predeterminada", "Clonada (Personalizada...)"],
             state="readonly",
             width=200,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8,
             command=self._on_cb_voice_mode_changed
         )
-        self.cb_voice_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
+        self.cb_voice_dropdown.grid(row=2, column=1, padx=5, pady=6, sticky="w")
 
-        # Frame de voz clonada
         self.cb_clone_frame = ctk.CTkFrame(self.chatterbox_panel, fg_color="transparent")
         self.cb_clone_frame.grid_columnconfigure(1, weight=1)
         
-        ctk.CTkLabel(self.cb_clone_frame, text="Audio de Referencia (~10s):").grid(row=0, column=0, padx=5, pady=4, sticky="w")
-        self.cb_ref_audio_entry = ctk.CTkEntry(self.cb_clone_frame, width=280)
+        ctk.CTkLabel(self.cb_clone_frame, text="Audio de Referencia (~10s):", font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=5, pady=4, sticky="w")
+        self.cb_ref_audio_entry = ctk.CTkEntry(
+            self.cb_clone_frame, width=280,
+            fg_color="#0F172A", border_color="#334155", border_width=1, text_color="#F1F5F9", corner_radius=8
+        )
         self.cb_ref_audio_entry.grid(row=0, column=1, padx=5, pady=4, sticky="ew")
         
         self.cb_ref_browse_btn = ctk.CTkButton(
             self.cb_clone_frame,
             text="Examinar...",
             width=90,
+            fg_color="#334155",
+            hover_color="#475569",
+            text_color="#F1F5F9",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            corner_radius=8,
             command=self._browse_ref_audio
         )
         self.cb_ref_browse_btn.grid(row=0, column=2, padx=5, pady=4)
 
-        self.chatterbox_panel.grid_columnconfigure(1, weight=1)
-
-        # ── Kokoro panel (Kokoro) ──────────────────────────────────────────────
-        self.kokoro_panel = ctk.CTkFrame(self.main_frame)
-        # Oculto por defecto
+        # ── Kokoro panel (Kokoro) ──
+        self.kokoro_panel = ctk.CTkFrame(self.config_card, fg_color="transparent")
+        self.kokoro_panel.grid_columnconfigure(1, weight=1)
         
         ctk.CTkLabel(
             self.kokoro_panel,
-            text="Kokoro TTS — Offline (IA local)",
-            font=("Arial", 13, "bold")
-        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(8, 4), sticky="w")
+            text="🎙️ Configuración de Voz (Kokoro local)",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color="#F8FAFC"
+        ).grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky="w")
 
-        # Estado del modelo y voces
         self.kokoro_status_lbl = ctk.CTkLabel(
             self.kokoro_panel,
             text="Verificando componentes...",
-            font=("Arial", 11)
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#94A3B8"
         )
         self.kokoro_status_lbl.grid(row=1, column=0, columnspan=2, padx=5, pady=4, sticky="w")
 
@@ -318,14 +404,16 @@ class TextToSpeechApp(ctk.CTk):
             self.kokoro_panel,
             text="Descargar modelo Kokoro (~180MB)",
             width=260,
-            fg_color="#E65100",
-            hover_color="#F4511E",
+            fg_color="#F97316",
+            hover_color="#EA580C",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            corner_radius=8,
             command=self._download_kokoro_model
         )
-        self.kokoro_dl_btn.grid(row=1, column=2, padx=5, pady=4, sticky="e")
+        self.kokoro_dl_btn.grid(row=1, column=2, padx=10, pady=4, sticky="e")
 
-        # Tipo de voz
-        ctk.CTkLabel(self.kokoro_panel, text="Idioma:").grid(row=2, column=0, padx=5, pady=4, sticky="w")
+        ctk.CTkLabel(self.kokoro_panel, text="Idioma:", font=ctk.CTkFont(size=12)).grid(row=2, column=0, padx=5, pady=6, sticky="w")
         self.kokoro_lang_var = tk.StringVar(value="Español")
         self.kokoro_lang_dropdown = ctk.CTkComboBox(
             self.kokoro_panel,
@@ -333,132 +421,203 @@ class TextToSpeechApp(ctk.CTk):
             values=["Español", "Inglés"],
             state="readonly",
             width=120,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8,
             command=self._update_kokoro_voices
         )
-        self.kokoro_lang_dropdown.grid(row=2, column=1, padx=5, pady=4, sticky="w")
+        self.kokoro_lang_dropdown.grid(row=2, column=1, padx=5, pady=6, sticky="w")
 
-        ctk.CTkLabel(self.kokoro_panel, text="Voz Kokoro:").grid(row=3, column=0, padx=5, pady=4, sticky="w")
+        ctk.CTkLabel(self.kokoro_panel, text="Voz Kokoro:", font=ctk.CTkFont(size=12)).grid(row=3, column=0, padx=5, pady=6, sticky="w")
         self.kokoro_voice_var = tk.StringVar()
         self.kokoro_voice_dropdown = ctk.CTkComboBox(
             self.kokoro_panel,
             variable=self.kokoro_voice_var,
             values=[],
             state="readonly",
-            width=260
+            width=260,
+            fg_color="#0F172A", border_color="#334155", button_color="#1E293B", button_hover_color="#334155", corner_radius=8
         )
-        self.kokoro_voice_dropdown.grid(row=3, column=1, columnspan=2, padx=5, pady=4, sticky="ew")
+        self.kokoro_voice_dropdown.grid(row=3, column=1, columnspan=2, padx=5, pady=6, sticky="ew")
 
-        # Barra de progreso de descarga
-        self.kokoro_dl_bar = ctk.CTkProgressBar(self.kokoro_panel, mode="determinate")
+        self.kokoro_dl_bar = ctk.CTkProgressBar(self.kokoro_panel, mode="determinate", fg_color="#0F172A", progress_color="#4F46E5", height=8)
         self.kokoro_dl_bar.grid(row=4, column=0, columnspan=3, padx=5, pady=(4, 8), sticky="ew")
         self.kokoro_dl_bar.set(0)
-        self.kokoro_dl_bar.grid_remove() # Oculto por defecto
-
-        self.kokoro_panel.grid_columnconfigure(1, weight=1)
+        self.kokoro_dl_bar.grid_remove()
         
-        # Initialize Kokoro voices list
         self._update_kokoro_voices()
 
-        # ── Chapter selection collapsible panel ──────────────────────────────────
+        # ── Chapter Selection Collapsible (row 5) ──────────────────────────────
         self.chapter_toggle_btn = ctk.CTkButton(
             self.main_frame,
-            text="Seleccionar Capítulos (No hay archivo cargado)",
+            text="📖 Mostrar Capítulos (No hay archivo cargado)",
             command=self.toggle_chapter_panel,
-            state=tk.DISABLED
+            state=tk.DISABLED,
+            height=36,
+            fg_color="#334155",
+            hover_color="#475569",
+            text_color="#F1F5F9",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            corner_radius=8
         )
-        self.chapter_toggle_btn.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
+        self.chapter_toggle_btn.grid(row=5, column=0, pady=(10, 5), sticky="ew")
 
         # Container for chapters checkboxes (hidden by default)
-        self.chapter_container = ctk.CTkFrame(self.main_frame)
+        self.chapter_container = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="#1E293B",
+            corner_radius=12,
+            border_color="#334155",
+            border_width=1
+        )
         
         # Header with select all/deselect all
         ctrl_frame = ctk.CTkFrame(self.chapter_container, fg_color="transparent")
-        ctrl_frame.pack(fill=tk.X, padx=5, pady=5)
+        ctrl_frame.pack(fill=tk.X, padx=15, pady=8)
         
         ctk.CTkButton(
-            ctrl_frame, text="Seleccionar todo", width=120, height=24, font=("Arial", 11),
-            command=self._select_all_chapters
+            ctrl_frame, text="Seleccionar todo", width=120, height=26,
+            fg_color="#334155", hover_color="#475569", text_color="#F1F5F9",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            corner_radius=6, command=self._select_all_chapters
         ).pack(side=tk.LEFT, padx=2)
         
         ctk.CTkButton(
-            ctrl_frame, text="Deseleccionar todo", width=120, height=24, font=("Arial", 11),
-            command=self._deselect_all_chapters
+            ctrl_frame, text="Deseleccionar todo", width=120, height=26,
+            fg_color="#334155", hover_color="#475569", text_color="#F1F5F9",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            corner_radius=6, command=self._deselect_all_chapters
         ).pack(side=tk.LEFT, padx=2)
         
-        self.chapter_scroll_frame = ctk.CTkScrollableFrame(self.chapter_container, height=180)
-        self.chapter_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+        self.chapter_scroll_frame = ctk.CTkScrollableFrame(self.chapter_container, height=180, fg_color="#0F172A", corner_radius=8)
+        self.chapter_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
 
-        # ── Action buttons ─────────────────────────────────────────────────────
-        self.buttons_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.buttons_frame.grid(row=6, column=0, columnspan=3, pady=20)
+        # ── Card 4: Progress & Controls (row 7) ──────────────────────────────────
+        progress_card = ctk.CTkFrame(
+            self.main_frame,
+            fg_color="#1E293B",
+            corner_radius=12,
+            border_color="#334155",
+            border_width=1
+        )
+        progress_card.grid(row=7, column=0, padx=5, pady=8, sticky="ew")
+        progress_card.grid_columnconfigure(0, weight=1)
+
+        # Action Buttons inside progress card to unify look
+        self.buttons_frame = ctk.CTkFrame(progress_card, fg_color="transparent")
+        self.buttons_frame.grid(row=0, column=0, padx=15, pady=15, sticky="ew")
+        self.buttons_frame.grid_columnconfigure(0, weight=1)
+        self.buttons_frame.grid_columnconfigure(1, weight=1)
 
         self.convert_btn = ctk.CTkButton(
-            self.buttons_frame, text="Convertir a MP3",
-            command=self.start_conversion, height=40, font=("Arial", 14, "bold")
+            self.buttons_frame, text="🚀 Convertir a MP3",
+            command=self.start_conversion, height=42,
+            fg_color="#10B981", hover_color="#059669",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            corner_radius=8
         )
-        self.convert_btn.pack(side=tk.LEFT, padx=5)
+        self.convert_btn.grid(row=0, column=0, padx=(0, 5), sticky="ew")
 
         self.cancel_btn = ctk.CTkButton(
-            self.buttons_frame, text="Cancelar",
-            command=self.cancel_conversion, height=40,
-            fg_color="#8B0000", hover_color="#A52A2A"
+            self.buttons_frame, text="🛑 Cancelar",
+            command=self.cancel_conversion, height=42,
+            fg_color="#EF4444", hover_color="#DC2626",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            corner_radius=8
         )
-        self.cancel_btn.pack(side=tk.LEFT, padx=5)
+        self.cancel_btn.grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
-        # ── Progress ───────────────────────────────────────────────────────────
-        self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.progress_frame.grid(row=7, column=0, columnspan=3, sticky="ew", pady=10)
+        # Progress bar
+        self.progress_frame = ctk.CTkFrame(progress_card, fg_color="transparent")
+        self.progress_frame.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
 
-        self.progress_bar = ctk.CTkProgressBar(self.progress_frame, mode="determinate")
+        self.progress_bar = ctk.CTkProgressBar(self.progress_frame, mode="determinate", fg_color="#0F172A", progress_color="#4F46E5", height=10)
         self.progress_bar.pack(fill=tk.X, pady=5)
         self.progress_bar.set(0)
 
         self.toggle_btn = ctk.CTkButton(
             self.progress_frame, text="▼ Mostrar detalles de progreso",
-            font=("Arial", 10), fg_color="transparent",
+            font=ctk.CTkFont(family="Segoe UI", size=11), fg_color="transparent",
             hover_color=("#f0f0f0", "#2b2b2b"),
-            text_color=("gray10", "gray90"),
+            text_color="#94A3B8",
             command=self.toggle_detailed_progress, width=200, height=20
         )
         self.toggle_btn.pack(pady=(5, 0))
 
         self.detailed_frame = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
 
-        self.chapter_label = ctk.CTkLabel(self.detailed_frame, text="Capítulo: 0/0", anchor="w")
+        self.chapter_label = ctk.CTkLabel(
+            self.detailed_frame, text="📖 Capítulo: 0/0", anchor="w",
+            font=ctk.CTkFont(family="Segoe UI", size=12), text_color="#E2E8F0"
+        )
         self.chapter_label.pack(fill=tk.X, pady=2)
 
-        self.char_label = ctk.CTkLabel(self.detailed_frame, text="Caracteres: 0/0 (0%)", anchor="w")
+        self.char_label = ctk.CTkLabel(
+            self.detailed_frame, text="🔤 Caracteres: 0/0 (0%)", anchor="w",
+            font=ctk.CTkFont(family="Segoe UI", size=12), text_color="#E2E8F0"
+        )
         self.char_label.pack(fill=tk.X, pady=2)
 
-        # ── Status bar ─────────────────────────────────────────────────────────
+        # ── Status bar (row 8) ──────────────────────────────────────────────────
         self.status_var = tk.StringVar(value="Listo")
         self.status_bar = ctk.CTkLabel(
-            self.main_frame, textvariable=self.status_var, anchor="w", height=20
+            self.main_frame, textvariable=self.status_var, anchor="w", height=20,
+            font=ctk.CTkFont(family="Segoe UI", size=11), text_color="#64748B"
         )
-        self.status_bar.grid(row=8, column=0, columnspan=3, sticky="ew", pady=10)
+        self.status_bar.grid(row=8, column=0, padx=5, pady=(5, 0), sticky="ew")
 
         # ── Footer ─────────────────────────────────────────────────────────────
-        self.footer_frame = ctk.CTkFrame(self, height=20, fg_color="transparent")
-        self.footer_frame.grid(row=2, column=0, sticky="sew", padx=10, pady=(0, 5))
+        self.footer_frame = ctk.CTkFrame(self, height=25, fg_color="transparent")
+        self.footer_frame.grid(row=2, column=0, sticky="sew", padx=20, pady=(0, 10))
         self.grid_rowconfigure(2, weight=0)
 
         self.dev_credit = ctk.CTkLabel(
-            self.footer_frame, text="Desarrollado por WHITE with ❤",
-            text_color=("#666666", "#999999"), font=("Arial", 10, "italic")
+            self.footer_frame, text="Desarrollado con ❤ para EGE",
+            text_color="#475569", font=ctk.CTkFont(family="Segoe UI", size=10, italic=True)
         )
         self.dev_credit.pack(side=tk.LEFT)
 
         self.github_link = ctk.CTkLabel(
             self.footer_frame, text="GitHub",
-            text_color=("#1a73e8", "#8ab4f8"),
-            cursor="hand2", font=("Arial", 10, "underline")
+            text_color="#6366F1",
+            cursor="hand2", font=ctk.CTkFont(family="Segoe UI", size=10, underline=True)
         )
         self.github_link.pack(side=tk.RIGHT)
         self.github_link.bind("<Button-1>", lambda e: self.open_github())
         self.footer_frame.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
+        # Set initial styles for the active engine button
+        self._update_engine_button_styles()
+
     # ─── Engine toggle helpers ─────────────────────────────────────────────────
+
+    def _update_engine_button_styles(self):
+        """Actualiza visualmente los botones del selector de motor según el estado activo."""
+        mode = self.engine_mode.get()
+        for btn, key in [
+            (self.btn_online, "online"),
+            (self.btn_offline, "offline"),
+            (self.btn_chatterbox, "chatterbox"),
+            (self.btn_kokoro, "kokoro")
+        ]:
+            if mode == key:
+                btn.configure(
+                    fg_color="#4F46E5",
+                    text_color="#FFFFFF",
+                    hover_color="#4338CA",
+                    border_width=0,
+                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
+                )
+            else:
+                btn.configure(
+                    fg_color="#0F172A",
+                    text_color="#94A3B8",
+                    hover_color="#1E293B",
+                    border_width=1,
+                    border_color="#334155",
+                    font=ctk.CTkFont(family="Segoe UI", size=12)
+                )
 
     def _set_engine(self, mode: str):
         """Switch between 'online', 'offline' (Piper), 'chatterbox' and 'kokoro' engine."""
@@ -472,30 +631,22 @@ class TextToSpeechApp(ctk.CTk):
         if hasattr(self, 'kokoro_panel'):
             self.kokoro_panel.grid_remove()
 
-        # Restaurar colores de botones
-        self.btn_online.configure(fg_color="#424242")
-        self.btn_offline.configure(fg_color="#424242")
-        self.btn_chatterbox.configure(fg_color="#424242")
-        if hasattr(self, 'btn_kokoro'):
-            self.btn_kokoro.configure(fg_color="#424242")
+        # Update button styles dynamically
+        self._update_engine_button_styles()
 
         if mode == "online":
-            self.btn_online.configure(fg_color="#1565C0")
-            self.engine_badge.configure(text="● Online", text_color="#4CAF50")
-            self.online_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self.engine_badge.configure(text="● Online", text_color="#10B981")
+            self.online_panel.grid(row=1, column=0, columnspan=3, padx=15, pady=15, sticky="ew")
         elif mode == "offline":
-            self.btn_offline.configure(fg_color="#E65100")
-            self.engine_badge.configure(text="● Offline (Piper)", text_color="#FF9800")
-            self.offline_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self.engine_badge.configure(text="● Offline (Piper)", text_color="#F97316")
+            self.offline_panel.grid(row=1, column=0, columnspan=3, padx=15, pady=15, sticky="ew")
         elif mode == "chatterbox":
-            self.btn_chatterbox.configure(fg_color="#7B1FA2")
-            self.engine_badge.configure(text="● Chatterbox IA", text_color="#E040FB")
-            self.chatterbox_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self.engine_badge.configure(text="● Chatterbox IA", text_color="#A855F7")
+            self.chatterbox_panel.grid(row=1, column=0, columnspan=3, padx=15, pady=15, sticky="ew")
             self._check_chatterbox_status()
         elif mode == "kokoro":
-            self.btn_kokoro.configure(fg_color="#00695C")
-            self.engine_badge.configure(text="● Kokoro IA", text_color="#00897B")
-            self.kokoro_panel.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self.engine_badge.configure(text="● Kokoro IA", text_color="#10B981")
+            self.kokoro_panel.grid(row=1, column=0, columnspan=3, padx=15, pady=15, sticky="ew")
             self._check_kokoro_status()
 
     # ─── Chatterbox panel helpers ──────────────────────────────────────────────
@@ -806,7 +957,7 @@ class TextToSpeechApp(ctk.CTk):
 
     def _update_chapter_toggle_btn_text(self):
         if not hasattr(self, 'chapters_data') or not self.chapters_data:
-            self.chapter_toggle_btn.configure(text="Seleccionar Capítulos (No hay archivo)")
+            self.chapter_toggle_btn.configure(text="📖 Seleccionar Capítulos (No hay archivo)")
             return
             
         total_chapters = len(self.chapters_data)
@@ -821,7 +972,7 @@ class TextToSpeechApp(ctk.CTk):
         # Update text
         status_text = "▲ Ocultar" if self.chapter_container.winfo_viewable() else "▼ Mostrar"
         self.chapter_toggle_btn.configure(
-            text=f"{status_text} Capítulos — {selected_count}/{total_chapters} seleccionados ({sel_chars:,} caract.)"
+            text=f"📖 {status_text} Capítulos — {selected_count}/{total_chapters} seleccionados ({sel_chars:,} caract.)"
         )
 
     def toggle_chapter_panel(self):
@@ -829,7 +980,7 @@ class TextToSpeechApp(ctk.CTk):
         if self.chapter_container.winfo_viewable():
             self.chapter_container.grid_remove()
         else:
-            self.chapter_container.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+            self.chapter_container.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
         self._update_chapter_toggle_btn_text()
 
     def _select_all_chapters(self):
