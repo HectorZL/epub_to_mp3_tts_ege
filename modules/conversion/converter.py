@@ -27,9 +27,17 @@ class AudioConverter:
         output_file: str,
         rate: str = "-10%",
         volume: str = "+0%",
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        output_format: str = "mp3"
     ) -> bool:
-        """Convert text to speech and save as MP3"""
+        """Convert text to speech and save in the requested audio format."""
+        output_format = self._normalise_output_format(output_format)
+        if self.engine_mode == "online" and output_format != "mp3":
+            raise ValueError(
+                "El motor Online solo puede exportar MP3. "
+                "Selecciona MP3 o cambia a un motor Offline para usar WAV/FLAC."
+            )
+
         # Clean and validate input text
         if not text or not text.strip():
             raise ValueError("El texto está vacío o solo contiene espacios en blanco")
@@ -87,10 +95,11 @@ class AudioConverter:
             os.makedirs(temp_dir, exist_ok=True)
 
             # Prepare chunks and associate with temp file names
+            chunk_extension = f".{output_format}"
             tasks_data = []
             for i, chunk in enumerate(chunks, 1):
                 if chunk and chunk.strip():
-                    temp_file = os.path.join(temp_dir, f"chunk_{i}.mp3")
+                    temp_file = os.path.join(temp_dir, f"chunk_{i}{chunk_extension}")
                     tasks_data.append((i, chunk, temp_file))
             
             # If no valid chunks were processed
@@ -147,9 +156,9 @@ class AudioConverter:
                         if self.engine_mode == "offline" and self.piper_manager:
                             # ── Piper offline ─────────────────────────────────
                             def run_piper():
-                                tmp_wav = os.path.splitext(temp_file)[0] + ".wav"
+                                tmp_wav = temp_file + ".source.wav"
                                 self.piper_manager.synthesize(chunk, voice_name, tmp_wav)
-                                self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
+                                self._encode_wav_output(tmp_wav, temp_file, output_format)
                                 try:
                                     os.remove(tmp_wav)
                                 except Exception:
@@ -159,17 +168,10 @@ class AudioConverter:
                         elif self.engine_mode == "chatterbox" and self.chatterbox_manager:
                             # ── Chatterbox offline ────────────────────────────
                             def run_chatterbox():
-                                tmp_wav = os.path.splitext(temp_file)[0] + ".wav"
+                                tmp_wav = temp_file + ".source.wav"
                                 audio_prompt = None if voice_name == "default" else voice_name
                                 self.chatterbox_manager.synthesize(chunk, tmp_wav, audio_prompt_path=audio_prompt)
-                                # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
-                                if self.piper_manager:
-                                    self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
-                                else:
-                                    # Fallback si piper_manager no está disponible
-                                    import soundfile as sf
-                                    data, samplerate = sf.read(tmp_wav)
-                                    sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
+                                self._encode_wav_output(tmp_wav, temp_file, output_format)
                                 try:
                                     os.remove(tmp_wav)
                                 except Exception:
@@ -179,16 +181,9 @@ class AudioConverter:
                         elif self.engine_mode == "kokoro" and self.kokoro_manager:
                             # ── Kokoro offline ────────────────────────────────
                             def run_kokoro():
-                                tmp_wav = os.path.splitext(temp_file)[0] + ".wav"
+                                tmp_wav = temp_file + ".source.wav"
                                 self.kokoro_manager.synthesize(chunk, voice_name, tmp_wav)
-                                # Reutilizar el convertidor de wav_to_mp3 de piper_manager si existe
-                                if self.piper_manager:
-                                    self.piper_manager.wav_to_mp3(tmp_wav, temp_file)
-                                else:
-                                    # Fallback si piper_manager no está disponible
-                                    import soundfile as sf
-                                    data, samplerate = sf.read(tmp_wav)
-                                    sf.write(temp_file, data, samplerate, format='MP3', subtype='MPEG_LAYER_III')
+                                self._encode_wav_output(tmp_wav, temp_file, output_format)
                                 try:
                                     os.remove(tmp_wav)
                                 except Exception:
@@ -274,6 +269,7 @@ class AudioConverter:
         progress_callback: Optional[Callable[[int, int], None]] = None,
         join_chapters: bool = True,
         keep_chapters: bool = True,
+        output_format: str = "mp3",
     ) -> None:
         """Convert text file to speech with progress tracking and chapter support"""
         try:
@@ -300,7 +296,8 @@ class AudioConverter:
                     output_file=output_path, 
                     rate=rate, 
                     volume=volume,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    output_format=output_format
                 )
             elif isinstance(result, list):
                 # Chapter-based content
@@ -351,7 +348,8 @@ class AudioConverter:
                         output_file=chapter_output,
                         rate=rate,
                         volume=volume,
-                        progress_callback=None  # No progress for individual chapters
+                        progress_callback=None,  # No progress for individual chapters
+                        output_format=output_format
                     )
                     chapter_files.append(chapter_output)
                 
@@ -469,34 +467,78 @@ class AudioConverter:
             
         return chunks
     
+    @staticmethod
+    def _normalise_output_format(output_format: str) -> str:
+        """Validate and normalize the supported output format names."""
+        normalized = (output_format or "mp3").lower().lstrip(".")
+        if normalized not in {"mp3", "wav", "flac"}:
+            raise ValueError(f"Formato de salida no soportado: {output_format}")
+        return normalized
+
+    def _encode_wav_output(self, wav_path: str, output_path: str, output_format: str):
+        """Encode a locally generated WAV without silently mislabeling files."""
+        import shutil
+
+        output_format = self._normalise_output_format(output_format)
+        if output_format == "wav":
+            shutil.copy2(wav_path, output_path)
+        elif output_format == "flac":
+            import soundfile as sf
+            data, samplerate = sf.read(wav_path)
+            sf.write(output_path, data, samplerate, format="FLAC")
+        elif self.piper_manager:
+            self.piper_manager.wav_to_mp3(wav_path, output_path)
+        else:
+            raise RuntimeError(
+                "No hay un codificador MP3 disponible para este motor local. "
+                "Instala FFmpeg o utiliza WAV/FLAC."
+            )
+
     def _combine_audio_files(self, input_files: List[str], output_file: str):
         """Combine multiple audio files into one"""
         if not input_files:
             return
 
-        # Verificar si el contenido real son archivos WAV
-        is_wav = False
-        with open(input_files[0], 'rb') as f:
-            if f.read(4) == b'RIFF':
-                is_wav = True
+        output_format = os.path.splitext(output_file)[1].lower().lstrip(".")
 
-        if is_wav:
+        if output_format == "wav":
             import wave
-            with wave.open(output_file, 'wb') as outfile:
+            with wave.open(output_file, "wb") as outfile:
                 for i, fname in enumerate(input_files):
                     try:
-                        with wave.open(fname, 'rb') as infile:
+                        with wave.open(fname, "rb") as infile:
                             if i == 0:
                                 outfile.setparams(infile.getparams())
                             outfile.writeframes(infile.readframes(infile.getnframes()))
                     except Exception as e:
                         print(f"Warning: Could not read {fname}: {e}")
+        elif output_format == "flac":
+            # FLAC debe combinarse como audio decodificado; concatenar bytes
+            # produciría un archivo inválido con varias cabeceras FLAC.
+            import soundfile as sf
+            with sf.SoundFile(input_files[0], "r") as first:
+                with sf.SoundFile(
+                    output_file,
+                    "w",
+                    samplerate=first.samplerate,
+                    channels=first.channels,
+                    format="FLAC",
+                ) as outfile:
+                    for fname in input_files:
+                        with sf.SoundFile(fname, "r") as infile:
+                            if (infile.samplerate, infile.channels) != (first.samplerate, first.channels):
+                                raise ValueError("Los fragmentos tienen distintas propiedades de audio")
+                            while True:
+                                data = infile.read(65536, dtype="float32")
+                                if len(data) == 0:
+                                    break
+                                outfile.write(data)
         else:
-            # Archivos MP3 (edge-tts) se pueden concatenar directamente uniendo bytes
-            with open(output_file, 'wb') as outfile:
+            # Los fragmentos MP3 de edge-tts se pueden concatenar directamente.
+            with open(output_file, "wb") as outfile:
                 for fname in input_files:
                     try:
-                        with open(fname, 'rb') as infile:
+                        with open(fname, "rb") as infile:
                             outfile.write(infile.read())
                     except Exception as e:
                         print(f"Warning: Could not read {fname}: {e}")

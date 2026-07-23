@@ -244,8 +244,14 @@ class PiperVoiceManager:
             import subprocess, shutil
             if shutil.which("ffmpeg"):
                 try:
-                    subprocess.run(["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", mp3_path], check=True, capture_output=True)
-                except:
-                    shutil.copy2(wav_path, mp3_path)
-            else:
-                shutil.copy2(wav_path, mp3_path)
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "4", mp3_path],
+                        check=True,
+                        capture_output=True,
+                    )
+                    return
+                except Exception as ffmpeg_error:
+                    raise RuntimeError(f"FFmpeg no pudo crear el MP3: {ffmpeg_error}") from ffmpeg_error
+            raise RuntimeError(
+                "No se encontró un codificador MP3. Instala FFmpeg o exporta como WAV/FLAC."
+            ) from e

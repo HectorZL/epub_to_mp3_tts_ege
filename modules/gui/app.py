@@ -30,6 +30,8 @@ class TextToSpeechApp(ctk.CTk):
         
         self.input_file = ""
         self.output_file = ""
+        self.output_files_created: List[str] = []
+        self.output_format_var = tk.StringVar(value="MP3 — comprimido (~0.5–1.5 MB/min)")
         self.is_processing = False
         self.conversion_thread: Optional[threading.Thread] = None
         self.selected_chapters: Optional[List[int]] = None
@@ -513,6 +515,35 @@ class TextToSpeechApp(ctk.CTk):
         # Checkboxes for merging and keeping chapters (row 0)
         self.options_frame = ctk.CTkFrame(progress_card, fg_color="transparent")
         self.options_frame.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
+
+        # Output format selector. MP3 works with online and offline engines;
+        # WAV/FLAC are available for locally generated audio.
+        self.format_label = ctk.CTkLabel(
+            self.options_frame,
+            text="Formato:",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color="#E2E8F0"
+        )
+        self.format_label.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.output_format_dropdown = ctk.CTkComboBox(
+            self.options_frame,
+            variable=self.output_format_var,
+            values=[
+                "MP3 — comprimido (~0.5–1.5 MB/min)",
+                "WAV — sin pérdida (~2.5–3 MB/min)",
+                "FLAC — sin pérdida (~0.8–2 MB/min)",
+            ],
+            state="readonly",
+            width=220,
+            command=self._on_output_format_changed,
+            fg_color="#0F172A",
+            border_color="#334155",
+            button_color="#1E293B",
+            button_hover_color="#334155",
+            corner_radius=8,
+        )
+        self.output_format_dropdown.pack(side=tk.LEFT, padx=(0, 18))
 
         self.join_chapters_var = tk.BooleanVar(value=True)
         self.join_checkbox = ctk.CTkCheckBox(
@@ -1046,6 +1077,33 @@ class TextToSpeechApp(ctk.CTk):
         self.selected_chapters = []
         self._update_chapter_toggle_btn_text()
     
+    @staticmethod
+    def _format_file_size(size_bytes: int) -> str:
+        """Format a byte count for display in the completion message."""
+        size = float(size_bytes)
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024 or unit == "GB":
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} GB"
+
+    def _get_output_format(self) -> str:
+        """Return the normalized extension selected in the output format combo."""
+        format_map = {
+            "MP3 — comprimido (~0.5–1.5 MB/min)": "mp3",
+            "WAV — sin pérdida (~2.5–3 MB/min)": "wav",
+            "FLAC — sin pérdida (~0.8–2 MB/min)": "flac",
+        }
+        return format_map.get(self.output_format_var.get(), "mp3")
+
+    def _on_output_format_changed(self, value=None):
+        """Keep the suggested output filename and action button in sync."""
+        output_format = self._get_output_format()
+        if self.output_file:
+            base, _ = os.path.splitext(self.output_file)
+            self.output_file = f"{base}.{output_format}"
+        self.convert_btn.configure(text=f"🚀 Convertir a {output_format.upper()}")
+
     def browse_file(self):
         """Open file dialog to select input file"""
         filetypes = [
@@ -1066,7 +1124,8 @@ class TextToSpeechApp(ctk.CTk):
             self.load_file_chapters()
             
             # Set default output filename
-            output_name = f"{Path(filename).stem}.mp3"
+            output_format = self._get_output_format()
+            output_name = f"{Path(filename).stem}.{output_format}"
             self.output_file = str(Path(filename).parent / output_name)
     
     def cancel_conversion(self):
@@ -1081,6 +1140,15 @@ class TextToSpeechApp(ctk.CTk):
         """Start the conversion process"""
         if not self.input_file:
             messagebox.showerror("Error", "Por favor seleccione un archivo")
+            return
+
+        output_format = self._get_output_format()
+        if self.engine_mode.get() == "online" and output_format != "mp3":
+            messagebox.showerror(
+                "Formato no disponible",
+                "El motor Online solo exporta MP3. Cambia a un motor Offline "
+                "para usar WAV o FLAC."
+            )
             return
 
         # Pick correct voice depending on mode
@@ -1142,6 +1210,7 @@ class TextToSpeechApp(ctk.CTk):
         if self.is_processing:
             self.convert_btn.configure(state=tk.DISABLED)
             self.browse_btn.configure(state=tk.DISABLED)
+            self.output_format_dropdown.configure(state=tk.DISABLED)
             self.voice_dropdown.configure(state=tk.DISABLED)
             self.lang_dropdown.configure(state=tk.DISABLED)
             self.gender_dropdown.configure(state=tk.DISABLED)
@@ -1154,6 +1223,7 @@ class TextToSpeechApp(ctk.CTk):
         else:
             self.convert_btn.configure(state=tk.NORMAL)
             self.browse_btn.configure(state=tk.NORMAL)
+            self.output_format_dropdown.configure(state="readonly")
             self.voice_dropdown.configure(state="readonly")
             self.lang_dropdown.configure(state="readonly")
             self.gender_dropdown.configure(state="readonly")
@@ -1236,6 +1306,8 @@ class TextToSpeechApp(ctk.CTk):
     async def _convert_file(self, input_file: str, output_file: str, voice_name: str):
         """Convert the file using the audio converter"""
         try:
+            output_format = self._get_output_format()
+            self.output_files_created = []
             if hasattr(self, 'selected_chapters') and self.selected_chapters:
                 chap_numbers = [idx + 1 for idx in self.selected_chapters]
                 min_chap = min(chap_numbers)
@@ -1293,6 +1365,7 @@ class TextToSpeechApp(ctk.CTk):
                     combined_content,
                     voice_name,
                     output_file,
+                    output_format=output_format,
                     progress_callback=lambda current, total, chars=0, total_chars=total_chars: 
                         self.progress_callback(
                             current/total if total > 0 else 0, 
@@ -1302,6 +1375,7 @@ class TextToSpeechApp(ctk.CTk):
                             1
                         )
                 )
+                self.output_files_created = [output_file]
             elif isinstance(content, list) and content:
                 # Chapter-based conversion - process each chapter separately
                 # Filter chapters if selection exists
@@ -1375,6 +1449,7 @@ class TextToSpeechApp(ctk.CTk):
                         chapter_content,
                         voice_name,
                         chapter_output,
+                        output_format=output_format,
                         progress_callback=lambda current, total, i=i, chapter_chars=chapter_chars, 
                             processed_before=processed_before: 
                             self.progress_callback(
@@ -1399,6 +1474,8 @@ class TextToSpeechApp(ctk.CTk):
                                     os.remove(f)
                             except Exception as e:
                                 print(f"Error al borrar archivo individual {f}: {e}")
+
+                self.output_files_created = [output_file] if self.join_chapters_var.get() and chapter_files else chapter_files
                     
         except Exception as e:
             raise Exception(f"Error en la conversión: {str(e)}")
@@ -1484,10 +1561,26 @@ class TextToSpeechApp(ctk.CTk):
         self.update_ui_state()
 
     def on_conversion_complete(self):
-        """Handle successful conversion"""
+        """Handle successful conversion and report the generated file size."""
         self.progress_bar.set(1.0)
-        self.status_var.set("¡Conversión completada con éxito!")
-        messagebox.showinfo("Éxito", "La conversión se ha completado correctamente.")
+        generated_files = [
+            path for path in self.output_files_created
+            if path and os.path.exists(path)
+        ]
+        total_size = sum(os.path.getsize(path) for path in generated_files)
+        if generated_files:
+            size_text = self._format_file_size(total_size)
+            count_text = "archivo" if len(generated_files) == 1 else "archivos"
+            detail = f"\nTamaño total: {size_text} ({len(generated_files)} {count_text})"
+            self.status_var.set(f"¡Conversión completada! Tamaño: {size_text}")
+        else:
+            detail = ""
+            self.status_var.set("¡Conversión completada con éxito!")
+
+        messagebox.showinfo(
+            "Éxito",
+            f"La conversión se ha completado correctamente.{detail}"
+        )
         # Reset the UI after a short delay to show the success message
         self.after(2000, self.reset_ui_state)
     
